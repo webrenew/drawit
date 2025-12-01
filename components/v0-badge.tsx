@@ -31,7 +31,7 @@ export function V0Badge() {
       }}
     >
       <a
-        href="https://v0.dev"
+        href="https://v0.link/rXweSHb"
         target="_blank"
         rel="noopener noreferrer"
         style={{
