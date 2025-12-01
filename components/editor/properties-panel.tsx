@@ -395,7 +395,7 @@ export function PropertiesPanel({
 
   return (
     <div
-      className="absolute left-4 top-1/2 -translate-y-1/2 w-56 bg-card rounded-xl shadow-lg border border-border p-4 overflow-y-auto max-h-[80vh] z-40"
+      className="absolute left-4 top-1/2 -translate-y-1/2 w-56 bg-card rounded-xl shadow-lg border border-border p-4 overflow-y-auto max-h-[80vh] z-40 scrollbar-hide"
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
