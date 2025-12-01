@@ -61,7 +61,7 @@ BLOB_READ_WRITE_TOKEN=your_blob_token
 ### Installation
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/WebRenew/drawit.git
 cd drawit
 
 # Install dependencies
