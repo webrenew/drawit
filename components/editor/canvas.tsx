@@ -1036,6 +1036,11 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
             return { ...el, points: [...(el.points || []), newPoint] }
           }
 
+          if (el.type === "line" || el.type === "arrow") {
+            const endPoint: [number, number] = [x - el.x, y - el.y]
+            return { ...el, points: [[0, 0], endPoint] }
+          }
+
           const width = x - el.x
           const height = y - el.y
 
