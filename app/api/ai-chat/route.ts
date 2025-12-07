@@ -6,6 +6,13 @@
 import type { UIMessage } from "ai"
 import { streamText, tool, convertToModelMessages } from "ai"
 import { z } from "zod"
+import { anthropic } from "@ai-sdk/anthropic"
+import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { openai } from "@ai-sdk/openai"
+
+const google = createGoogleGenerativeAI({
+  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+})
 
 export const maxDuration = 60
 
@@ -57,6 +64,8 @@ When recreating from images:
 Be concise in your responses. Focus on creating accurate diagrams.`
 }
 
+
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
@@ -66,16 +75,28 @@ export async function POST(req: Request) {
       theme?: string
     }
 
-    const selectedModel = req.headers.get("x-selected-model") || "anthropic/claude-3-5-sonnet-latest"
+    const selectedModelId = req.headers.get("x-selected-model") || "anthropic/claude-3-5-sonnet-latest"
 
     // Default canvas info if not provided
     const canvas = canvasInfo || { centerX: 400, centerY: 300, width: 800, height: 600 }
     const currentTheme = theme || "dark"
 
-    console.log("[v0] AI Chat request - model:", selectedModel, "messages:", messages.length)
+    console.log("[v0] AI Chat request - model:", selectedModelId, "messages:", messages.length)
+
+    let model: any
+
+    if (selectedModelId.startsWith("anthropic/")) {
+      model = anthropic(selectedModelId.replace("anthropic/", ""))
+    } else if (selectedModelId.startsWith("google/")) {
+      model = google(selectedModelId.replace("google/", ""))
+    } else if (selectedModelId.startsWith("openai/")) {
+      model = openai(selectedModelId.replace("openai/", ""))
+    } else {
+      model = anthropic("claude-3-5-sonnet-latest")
+    }
 
     const result = streamText({
-      model: selectedModel,
+      model: model,
       system: getSystemPrompt(currentTheme, canvas),
       messages: convertToModelMessages(messages),
       tools: {

@@ -249,7 +249,7 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
         const response = await fetch("/api/chat-history")
         if (response.ok) {
           const data = await response.json()
-          
+
           // Check if we should use localStorage (Blob not configured)
           if (data.useLocalStorage) {
             setUseLocalStorage(true)
@@ -319,7 +319,7 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     // Filter out tool-related parts but keep text, file, and reasoning parts
     const serializableMessages = messages.map((msg) => {
       const anyMsg = msg as any
-      
+
       // Filter parts to only serializable types (text, file, reasoning)
       // Exclude tool-* parts as they contain non-serializable data
       const serializableParts = msg.parts?.filter((part) => {
@@ -337,7 +337,7 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
         }
         return part
       })
-      
+
       return {
         id: msg.id,
         role: msg.role,
@@ -356,7 +356,7 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     const timeoutId = setTimeout(async () => {
       // Debug: log what we're saving
       console.log("[v0] Saving messages:", serializableMessages.length, "roles:", serializableMessages.map(m => m.role))
-      
+
       // Always save to localStorage as backup
       try {
         localStorage.setItem(CHAT_HISTORY_LOCAL_KEY, JSON.stringify({
@@ -381,7 +381,7 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
           body: JSON.stringify({ messages: serializableMessages }),
         })
         const data = await response.json()
-        
+
         // Check if server tells us to use localStorage
         if (data.useLocalStorage) {
           setUseLocalStorage(true)
@@ -401,14 +401,14 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
   const handleClearChat = async () => {
     setMessages([])
     lastSaveRef.current = ""
-    
+
     // Always clear localStorage
     try {
       localStorage.removeItem(CHAT_HISTORY_LOCAL_KEY)
     } catch {
       // Ignore localStorage errors
     }
-    
+
     // Also try to clear on server
     try {
       await fetch("/api/chat-history", { method: "DELETE" })
@@ -588,7 +588,7 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
       {/* Error display */}
       {status === "error" && (
         <div className="px-3 pb-3 flex-shrink-0">
-          <div className="text-sm text-destructive bg-destructive/10 rounded p-2">Error loading chat history</div>
+          <div className="text-sm text-destructive bg-destructive/10 rounded p-2">Error generating response. Please try again or switch models.</div>
         </div>
       )}
     </div>
