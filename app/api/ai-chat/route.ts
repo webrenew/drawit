@@ -16,8 +16,8 @@ export const maxDuration = 60
 
 /**
  * Transform messages to handle file->image part conversion for v6 compatibility.
- * The client sends `type: "file"` with `data` (base64), but v6 expects `type: "image"` 
- * with `image` property for image content parts.
+ * AI SDK v6's useChat sends File[] which it converts to multi-modal parts.
+ * This function ensures compatibility with any format variations.
  */
 function transformMessagesForV6(messages: UIMessage[]): UIMessage[] {
   return messages.map((msg) => {
@@ -25,16 +25,26 @@ function transformMessagesForV6(messages: UIMessage[]): UIMessage[] {
       return msg
     }
 
+    // Debug: Log what parts we're receiving
+    const partTypes = msg.parts.map((p: Record<string, unknown>) => p.type)
+    console.log("[ai-chat] Message parts types:", partTypes)
+
     const transformedParts = msg.parts.map((part: Record<string, unknown>) => {
-      // Transform file parts with image media types to image parts
+      // Handle file parts (legacy format) - convert to image parts
       if (part.type === "file" && typeof part.mediaType === "string" && part.mediaType.startsWith("image/")) {
         const dataUrl = part.data || part.url
         if (typeof dataUrl === "string") {
+          console.log("[ai-chat] Transforming file part to image part")
           return {
             type: "image" as const,
-            image: dataUrl, // base64 data URL
+            image: dataUrl,
           }
         }
+      }
+      // Handle image parts (v6 format) - pass through
+      if (part.type === "image") {
+        console.log("[ai-chat] Image part detected (already correct format)")
+        return part
       }
       return part
     })

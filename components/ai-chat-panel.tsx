@@ -15,7 +15,7 @@ import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { nanoid } from "nanoid"
-import type { FileUIPart } from "ai"
+// AI SDK v6: Files are sent as File[] directly, SDK converts them to data URLs
 import type { UIMessage } from "@ai-sdk/react"
 import { useAuth } from "@/components/auth-provider"
 import { chatService, type ChatSession } from "@/lib/services/chat-service"
@@ -619,29 +619,24 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
 
     try {
       if (imagesToSend.length > 0) {
-        const filesParts: FileUIPart[] = await Promise.all(
-          imagesToSend.map(async (img, i) => {
-            let dataUrl: string
-            if (img.file) {
-              dataUrl = await fileToBase64(img.file)
-            } else {
-              dataUrl = img.url
-            }
-            return {
-              type: "file" as const,
-              filename: img.file?.name || `image-${i}.png`,
-              mediaType: (img.file?.type || "image/png") as `image/${string}`,
-              url: dataUrl,
-            }
-          }),
-        )
+        // AI SDK v6: sendMessage expects File[] or FileList, not FileUIPart[]
+        // The SDK automatically converts them to data URLs
+        const files = imagesToSend
+          .filter(img => img.file) // Only include items with actual File objects
+          .map(img => img.file as File)
 
-        console.log("[v0] Sending message with images:", imagesToSend.length)
+        console.log("[v0] Sending message with images:", files.length)
 
-        sendMessage({
-          text: messageText || "Please analyze this image and recreate what you see.",
-          files: filesParts,
-        })
+        if (files.length > 0) {
+          sendMessage({
+            text: messageText || "Please analyze this image and recreate what you see.",
+            files: files,
+          })
+        } else {
+          // Fallback: if no File objects, just send text
+          console.warn("[v0] No File objects available, sending text only")
+          sendMessage({ text: messageText || "Please analyze the uploaded content." })
+        }
       } else {
         sendMessage({ text: messageText })
       }
