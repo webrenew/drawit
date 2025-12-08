@@ -31,6 +31,7 @@ import type { CanvasElement, SmartConnection } from "@/lib/types"
 import { ChatMessages } from "@/components/ai-chat/chat-messages"
 import { ChatInput, type UploadedImage } from "@/components/ai-chat/chat-input"
 import { ModelSelector } from "@/components/ai-chat/model-selector"
+import { ChatHistorySheet } from "@/components/chat-history-sheet"
 
 // Tool handlers
 import {
@@ -424,6 +425,60 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     }
   }
 
+  // ============================================
+  // SELECT SESSION FROM HISTORY
+  // ============================================
+  const handleSelectSession = async (session: ChatSession) => {
+    setIsLoadingHistory(true)
+    try {
+      setChatSession(session)
+      const dbMessages = await chatService.getMessages(session.id)
+      const aiMessages = chatService.convertFromDbMessages(dbMessages)
+      setMessages(aiMessages)
+      lastSavedMessagesRef.current = JSON.stringify(aiMessages.map(m => ({ id: m.id, role: m.role })))
+      setLastSavedToCloud(new Date())
+      console.log("[chat] Loaded session:", session.id, "with", dbMessages.length, "messages")
+    } catch (error) {
+      console.error("[chat] Failed to load session:", error)
+      setCloudError("Failed to load chat")
+    } finally {
+      setIsLoadingHistory(false)
+    }
+  }
+
+  // ============================================
+  // START NEW CHAT
+  // ============================================
+  const handleNewChat = async () => {
+    setMessages([])
+    lastSavedMessagesRef.current = ""
+    setChatSession(null)
+    setLastSavedToCloud(null)
+    setCloudError(null)
+    
+    // Clear localStorage
+    try {
+      localStorage.removeItem(CHAT_HISTORY_LOCAL_KEY)
+    } catch (error) {
+      console.error("[chat] Failed to clear localStorage:", error)
+    }
+
+    // Create new session if logged in
+    if (user) {
+      try {
+        const newSession = await chatService.createSession({
+          diagram_id: currentDiagramId || null,
+          title: "New Chat",
+          model: selectedModel,
+        })
+        setChatSession(newSession)
+        console.log("[chat] Created new session:", newSession.id)
+      } catch (error) {
+        console.error("[chat] Failed to create new session:", error)
+      }
+    }
+  }
+
   const prevMessagesLengthRef = useRef(messages.length)
   useEffect(() => {
     // Only scroll if a new message was added, not on keyboard open/close
@@ -567,6 +622,13 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
           )}
         </div>
         <div className="flex items-center gap-1">
+          {user && (
+            <ChatHistorySheet
+              currentSessionId={chatSession?.id}
+              onSelectSession={handleSelectSession}
+              onNewChat={handleNewChat}
+            />
+          )}
           <button
             onClick={handleClearChat}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground"
