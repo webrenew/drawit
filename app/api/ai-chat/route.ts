@@ -1,18 +1,13 @@
 /**
  * AI Chat API Route - AI SDK v5 Stable
+ * Uses Vercel AI Gateway for model access
  * Based on https://sdk.vercel.ai/docs/ai-sdk-ui/chatbot-tool-usage
  */
 
 import type { UIMessage } from "ai"
 import { streamText, tool, convertToModelMessages } from "ai"
 import { z } from "zod"
-import { anthropic } from "@ai-sdk/anthropic"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
-import { openai } from "@ai-sdk/openai"
-
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-})
+import { gateway } from "@ai-sdk/gateway"
 
 export const maxDuration = 60
 
@@ -83,17 +78,8 @@ export async function POST(req: Request) {
 
     console.log("[v0] AI Chat request - model:", selectedModelId, "messages:", messages.length)
 
-    let model: any
-
-    if (selectedModelId.startsWith("anthropic/")) {
-      model = anthropic(selectedModelId.replace("anthropic/", ""))
-    } else if (selectedModelId.startsWith("google/")) {
-      model = google(selectedModelId.replace("google/", ""))
-    } else if (selectedModelId.startsWith("openai/")) {
-      model = openai(selectedModelId.replace("openai/", ""))
-    } else {
-      model = anthropic("claude-sonnet-4.5")
-    }
+    // Use Vercel AI Gateway for all models
+    const model = gateway(selectedModelId)
 
     const result = streamText({
       model: model,

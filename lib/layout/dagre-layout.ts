@@ -39,7 +39,6 @@ export function layoutWithDagre<T extends Node>(nodes: T[], edges: Edge[], optio
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
   // Create a new Dagre graph
-  // @ts-expect-error - Dagre types don't match runtime API
   const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
 
   // Configure graph layout
