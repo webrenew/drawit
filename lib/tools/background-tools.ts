@@ -1,5 +1,6 @@
 /**
  * Background Tools - For complex operations that need longer execution time
+ * AI SDK v6 - uses inputSchema instead of parameters
  * 
  * These tools trigger Trigger.dev background tasks for:
  * - Complex multi-node diagrams
@@ -29,7 +30,7 @@ export const backgroundTools = {
 - You estimate the diagram will have many elements
 
 The task runs server-side with more time and resources. Results are applied to the canvas automatically.`,
-    parameters: runBackgroundDiagramSchema,
+    inputSchema: runBackgroundDiagramSchema,
   }),
 }
 

@@ -1,5 +1,6 @@
 /**
  * Diagram creation tools - flowcharts, workflows, mind maps, org charts, etc.
+ * AI SDK v6 - uses inputSchema instead of parameters
  */
 
 import { tool } from "ai"
@@ -16,37 +17,36 @@ import {
 export const diagramTools = {
   createFlowchart: tool({
     description: "Create a flowchart with connected nodes. Supports per-node colors for visual distinction.",
-    parameters: createFlowchartSchema,
+    inputSchema: createFlowchartSchema,
   }),
 
   createWorkflow: tool({
     description: "Create n8n-style workflow automation diagrams.",
-    parameters: createWorkflowSchema,
+    inputSchema: createWorkflowSchema,
   }),
 
   createMindMap: tool({
     description: "Create a mind map for brainstorming and idea organization.",
-    parameters: createMindMapSchema,
+    inputSchema: createMindMapSchema,
   }),
 
   createOrgChart: tool({
     description: "Create an organizational chart showing team hierarchy.",
-    parameters: createOrgChartSchema,
+    inputSchema: createOrgChartSchema,
   }),
 
   createERDiagram: tool({
     description: "Create an entity-relationship diagram for database design.",
-    parameters: createERDiagramSchema,
+    inputSchema: createERDiagramSchema,
   }),
 
   createNetworkDiagram: tool({
     description: "Create a network/architecture diagram showing how systems connect. Supports per-node colors.",
-    parameters: createNetworkDiagramSchema,
+    inputSchema: createNetworkDiagramSchema,
   }),
 
   createMolecule: tool({
     description: "Create a molecular structure diagram. Supports common molecules like H2O, CO2, CH4, etc.",
-    parameters: createMoleculeSchema,
+    inputSchema: createMoleculeSchema,
   }),
 }
-

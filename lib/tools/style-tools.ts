@@ -1,5 +1,6 @@
 /**
  * Style manipulation tools for updating colors and visual properties
+ * AI SDK v6 - uses inputSchema instead of parameters
  */
 
 import { tool } from "ai"
@@ -9,7 +10,7 @@ export const styleTools = {
   updateStyles: tool({
     description:
       "Update colors and styles on existing elements without recreating the diagram. Use this when the user wants to change colors, stroke widths, or other visual properties.",
-    parameters: updateStylesSchema,
+    inputSchema: updateStylesSchema,
   }),
 }
 

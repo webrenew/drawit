@@ -493,7 +493,7 @@ export const aiDiagramTask = task({
         tools: {
           createFlowchart: tool({
             description: "Create a flowchart with connected nodes",
-            parameters: createFlowchartSchema,
+            inputSchema: createFlowchartSchema,
             execute: async (args) => {
               logger.info("Creating flowchart", { stepsCount: args.steps.length })
               const layout = layoutFlowchart(args.steps, args.connections, canvasInfo, args.direction)
@@ -504,7 +504,7 @@ export const aiDiagramTask = task({
           }),
           createNetworkDiagram: tool({
             description: "Create a network/architecture diagram",
-            parameters: createNetworkDiagramSchema,
+            inputSchema: createNetworkDiagramSchema,
             execute: async (args) => {
               logger.info("Creating network diagram", { nodesCount: args.nodes.length, topology: args.topology })
               const layout = layoutNetwork(args.nodes, args.links, args.topology, canvasInfo, args.centerNodeId, args.rootNodeId)
@@ -515,7 +515,7 @@ export const aiDiagramTask = task({
           }),
           createMindMap: tool({
             description: "Create a mind map for brainstorming",
-            parameters: createMindMapSchema,
+            inputSchema: createMindMapSchema,
             execute: async (args) => {
               logger.info("Creating mind map", { branchesCount: args.branches.length })
               const layout = layoutMindMap(args.centralTopic, args.branches, canvasInfo)
@@ -526,7 +526,7 @@ export const aiDiagramTask = task({
           }),
           createOrgChart: tool({
             description: "Create an organizational chart",
-            parameters: createOrgChartSchema,
+            inputSchema: createOrgChartSchema,
             execute: async (args) => {
               logger.info("Creating org chart", { membersCount: args.members.length })
               const layout = layoutOrgChart(args.members, canvasInfo)

@@ -1,5 +1,6 @@
 /**
  * Individual shape manipulation tools
+ * AI SDK v6 - uses inputSchema instead of parameters
  */
 
 import { tool } from "ai"
@@ -14,27 +15,27 @@ import {
 export const shapeTools = {
   createShape: tool({
     description: "Create a basic shape on the canvas.",
-    parameters: createShapeSchema,
+    inputSchema: createShapeSchema,
   }),
 
   updateShape: tool({
     description: "Update an existing shape's properties.",
-    parameters: updateShapeSchema,
+    inputSchema: updateShapeSchema,
   }),
 
   getShapeInfo: tool({
     description: "Get information about a specific shape.",
-    parameters: getShapeInfoSchema,
+    inputSchema: getShapeInfoSchema,
   }),
 
   placeImage: tool({
     description: "Place an image on the canvas.",
-    parameters: placeImageSchema,
+    inputSchema: placeImageSchema,
   }),
 
   previewDiagram: tool({
     description: "Preview changes before applying them.",
-    parameters: previewDiagramSchema,
+    inputSchema: previewDiagramSchema,
   }),
 }
 
