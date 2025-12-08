@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { Toolbar } from "./toolbar"
 import { PropertiesPanel } from "./properties-panel"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { LoginButton } from "@/components/auth/login-button"
 // import { AIChatPanel } from "@/components/ai-chat-panel" // Removed this import
 import { useTheme } from "@/components/theme-provider"
 import { normalizeOpacity, getGradientCoords, getSolidStrokeColor, compressImage } from "@/lib/canvas-helpers"
@@ -1637,6 +1638,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
             </svg>
           </a>
           <ThemeToggle />
+          <LoginButton />
         </div>
       </div>
 

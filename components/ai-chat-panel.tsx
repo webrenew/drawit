@@ -66,7 +66,6 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const [showModelMenu, setShowModelMenu] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
-  const [useLocalStorage, setUseLocalStorage] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -243,71 +242,22 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     },
   })
 
+  // Load chat history from localStorage
   useEffect(() => {
-    async function loadChatHistory() {
-      try {
-        const response = await fetch("/api/chat-history")
-        if (response.ok) {
-          const data = await response.json()
-
-          // Check if we should use localStorage (Blob not configured)
-          if (data.useLocalStorage) {
-            setUseLocalStorage(true)
-            // Try to load from localStorage
-            const localHistory = localStorage.getItem(CHAT_HISTORY_LOCAL_KEY)
-            if (localHistory) {
-              try {
-                const localData = JSON.parse(localHistory)
-                if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
-                  console.log("[v0] Loaded chat history from localStorage:", localData.messages.length, "messages")
-                  console.log("[v0] Message roles:", localData.messages.map((m: any) => m.role))
-                  setMessages(localData.messages)
-                }
-              } catch {
-                console.warn("[v0] Failed to parse localStorage chat history")
-              }
-            }
-          } else if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-            console.log("[v0] Loaded chat history from Blob:", data.messages.length, "messages")
-            console.log("[v0] Message roles:", data.messages.map((m: any) => m.role))
-            setMessages(data.messages)
-          }
-        } else {
-          // API failed, fall back to localStorage
-          setUseLocalStorage(true)
-          const localHistory = localStorage.getItem(CHAT_HISTORY_LOCAL_KEY)
-          if (localHistory) {
-            try {
-              const localData = JSON.parse(localHistory)
-              if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
-                console.log("[v0] Loaded chat history from localStorage (fallback):", localData.messages.length, "messages")
-                setMessages(localData.messages)
-              }
-            } catch {
-              console.warn("[v0] Failed to parse localStorage chat history")
-            }
-          }
+    try {
+      const localHistory = localStorage.getItem(CHAT_HISTORY_LOCAL_KEY)
+      if (localHistory) {
+        const localData = JSON.parse(localHistory)
+        if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
+          console.log("[chat] Loaded history from localStorage:", localData.messages.length, "messages")
+          setMessages(localData.messages)
         }
-      } catch (error) {
-        console.error("[v0] Failed to load chat history:", error)
-        // Fall back to localStorage on error
-        setUseLocalStorage(true)
-        try {
-          const localHistory = localStorage.getItem(CHAT_HISTORY_LOCAL_KEY)
-          if (localHistory) {
-            const localData = JSON.parse(localHistory)
-            if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
-              setMessages(localData.messages)
-            }
-          }
-        } catch {
-          // Ignore localStorage errors
-        }
-      } finally {
-        setIsLoadingHistory(false)
       }
+    } catch (error) {
+      console.warn("[chat] Failed to load chat history:", error)
+    } finally {
+      setIsLoadingHistory(false)
     }
-    loadChatHistory()
   }, [setMessages])
 
   const lastSaveRef = useRef<string>("")
@@ -353,65 +303,27 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     if (messagesJson === lastSaveRef.current) return
     lastSaveRef.current = messagesJson
 
-    const timeoutId = setTimeout(async () => {
-      // Debug: log what we're saving
-      console.log("[v0] Saving messages:", serializableMessages.length, "roles:", serializableMessages.map(m => m.role))
-
-      // Always save to localStorage as backup
+    const timeoutId = setTimeout(() => {
       try {
         localStorage.setItem(CHAT_HISTORY_LOCAL_KEY, JSON.stringify({
           messages: serializableMessages,
           updatedAt: new Date().toISOString(),
         }))
-      } catch (localError) {
-        console.warn("[v0] Failed to save to localStorage:", localError)
-      }
-
-      // If using localStorage only (Blob not configured), we're done
-      if (useLocalStorage) {
-        console.log("[v0] Saved chat history to localStorage:", serializableMessages.length, "messages")
-        return
-      }
-
-      // Also try to save to Blob
-      try {
-        const response = await fetch("/api/chat-history", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: serializableMessages }),
-        })
-        const data = await response.json()
-
-        // Check if server tells us to use localStorage
-        if (data.useLocalStorage) {
-          setUseLocalStorage(true)
-          console.log("[v0] Switched to localStorage (Blob not configured)")
-        } else {
-          console.log("[v0] Saved chat history to Blob:", serializableMessages.length, "messages")
-        }
+        console.log("[chat] Saved to localStorage:", serializableMessages.length, "messages")
       } catch (error) {
-        console.error("[v0] Failed to save chat history to Blob:", error)
-        setUseLocalStorage(true)
+        console.warn("[chat] Failed to save to localStorage:", error)
       }
     }, 1000)
 
     return () => clearTimeout(timeoutId)
-  }, [messages, isLoadingHistory, useLocalStorage])
+  }, [messages, isLoadingHistory])
 
-  const handleClearChat = async () => {
+  const handleClearChat = () => {
     setMessages([])
     lastSaveRef.current = ""
 
-    // Always clear localStorage
     try {
       localStorage.removeItem(CHAT_HISTORY_LOCAL_KEY)
-    } catch {
-      // Ignore localStorage errors
-    }
-
-    // Also try to clear on server
-    try {
-      await fetch("/api/chat-history", { method: "DELETE" })
     } catch (error) {
       console.error("Failed to clear chat history on server:", error)
     }
