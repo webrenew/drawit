@@ -617,7 +617,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         element.arrowHeadEnd = appState.currentItemArrowHeadEnd
       }
     } else if (type === "freedraw") {
-      element.points = [[0, 0]]
+      element.points = []
     } else if (type === "text") {
       element.fontSize = appState.currentItemFontSize || 20 // Use current font size
       element.fontWeight = appState.currentItemFontWeight || "normal" // Use current font weight
@@ -892,7 +892,8 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
     if (appState.tool === "freedraw") {
       const id = generateId()
       const newElement = createElement(id, x, y, appState.tool)
-      newElement.points = [[0, 0]]
+      // Don't add initial [0,0] point here - let mouseMove add points
+      // This prevents a spurious line segment from origin after normalization
       addElement(newElement)
       setDrawingElementId(id)
       return
@@ -1179,7 +1180,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         prev.map((el) => {
           if (el.id !== drawingElementId) return el
 
-          if (el.type === "freedraw" && el.points) {
+          if (el.type === "freedraw" && el.points && el.points.length > 0) {
             const xs = el.points.map((p) => p[0])
             const ys = el.points.map((p) => p[1])
             const minX = Math.min(...xs)
