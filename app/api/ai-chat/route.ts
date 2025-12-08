@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       theme?: string
     }
 
-    const selectedModelId = req.headers.get("x-selected-model") || "anthropic/claude-sonnet-4.5"
+    const selectedModelId = req.headers.get("x-selected-model") || "anthropic/claude-opus-4.5"
 
     // Default canvas info if not provided
     const canvas = canvasInfo || { centerX: 400, centerY: 300, width: 800, height: 600 }

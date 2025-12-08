@@ -8,10 +8,10 @@ export interface AIModel {
 }
 
 export const AVAILABLE_MODELS: AIModel[] = [
-  { id: "anthropic/claude-sonnet-4.5", name: "Claude Sonnet 4.5" },
+  { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5" },
 ]
 
-export const DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
+export const DEFAULT_MODEL = "anthropic/claude-opus-4.5"
 
 // Canvas info returned by getCanvasInfo
 export interface CanvasInfo {
