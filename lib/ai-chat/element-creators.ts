@@ -137,12 +137,16 @@ export function createArrowElement(
     endArrow?: boolean
   } = {},
 ): Omit<CanvasElement, "id"> {
+  // Calculate base position and relative points
+  const baseX = Math.min(fromX, toX)
+  const baseY = Math.min(fromY, toY)
+
   return {
     type: "arrow" as ToolType,
-    x: fromX,
-    y: fromY,
-    width: toX - fromX,
-    height: toY - fromY,
+    x: baseX,
+    y: baseY,
+    width: Math.abs(toX - fromX) || 1,
+    height: Math.abs(toY - fromY) || 1,
     strokeColor: options.strokeColor || "#000000",
     strokeWidth: 2,
     strokeStyle: "solid" as StrokeStyle,
@@ -155,5 +159,10 @@ export function createArrowElement(
     groupId: undefined,
     arrowHeadStart: options.startArrow ? "arrow" : "none",
     arrowHeadEnd: options.endArrow ?? true ? "arrow" : "none",
+    // Points are required for arrow/line rendering - relative to (x, y)
+    points: [
+      [fromX - baseX, fromY - baseY],
+      [toX - baseX, toY - baseY],
+    ],
   }
 }

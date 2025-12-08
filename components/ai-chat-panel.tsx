@@ -10,12 +10,16 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai"
 import { useCanvasStore } from "@/lib/store"
-import { MessageSquare, X, Trash2 } from "lucide-react"
+import { MessageSquare, X, Trash2, Cloud, CloudOff, Loader2 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { nanoid } from "nanoid"
 import type { FileUIPart } from "ai"
+import type { UIMessage } from "@ai-sdk/react"
+import { useAuth } from "@/components/auth-provider"
+import { chatService, type ChatSession } from "@/lib/services/chat-service"
+import { debounce } from "@/lib/utils/debounce"
 
 // Types and constants
 import type { ToolHandlerContext, ShapeRegistry, ShapeDataRegistry, AIChatPanelProps } from "@/lib/ai-chat/types"
@@ -58,6 +62,7 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 const CHAT_HISTORY_LOCAL_KEY = "drawit-chat-history"
+const SAVE_DEBOUNCE_MS = 2000
 
 export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreated }: AIChatPanelProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -66,11 +71,19 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const [showModelMenu, setShowModelMenu] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
+  
+  // Supabase chat state
+  const [chatSession, setChatSession] = useState<ChatSession | null>(null)
+  const [isSavingToCloud, setIsSavingToCloud] = useState(false)
+  const [lastSavedToCloud, setLastSavedToCloud] = useState<Date | null>(null)
+  const [cloudError, setCloudError] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const { resolvedTheme } = useTheme()
   const isMobile = useIsMobile()
+  const { user } = useAuth()
+  const currentDiagramId = useCanvasStore((state) => state.currentDiagramId)
 
   const elements = useCanvasStore((state) => state.elements)
   const addElement = useCanvasStore((state) => state.addElement)
@@ -242,90 +255,172 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     },
   })
 
-  // Load chat history from localStorage
+  // ============================================
+  // LOAD CHAT HISTORY
+  // ============================================
   useEffect(() => {
-    try {
-      const localHistory = localStorage.getItem(CHAT_HISTORY_LOCAL_KEY)
-      if (localHistory) {
-        const localData = JSON.parse(localHistory)
-        if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
-          console.log("[chat] Loaded history from localStorage:", localData.messages.length, "messages")
-          setMessages(localData.messages)
+    const loadHistory = async () => {
+      setIsLoadingHistory(true)
+      
+      // If user is logged in, try to load from Supabase
+      if (user) {
+        try {
+          // Get or create session for current diagram
+          const session = await chatService.getOrCreateSession(currentDiagramId, selectedModel)
+          setChatSession(session)
+          
+          // Load messages from Supabase
+          const dbMessages = await chatService.getMessages(session.id)
+          if (dbMessages.length > 0) {
+            const aiMessages = chatService.convertFromDbMessages(dbMessages)
+            setMessages(aiMessages)
+            console.log("[chat] Loaded", dbMessages.length, "messages from Supabase")
+            setLastSavedToCloud(new Date())
+          }
+          setIsLoadingHistory(false)
+          return
+        } catch (error) {
+          console.warn("[chat] Failed to load from Supabase, falling back to localStorage:", error)
+          setCloudError("Failed to sync with cloud")
         }
       }
-    } catch (error) {
-      console.warn("[chat] Failed to load chat history:", error)
-    } finally {
-      setIsLoadingHistory(false)
+      
+      // Fallback to localStorage
+      try {
+        const localHistory = localStorage.getItem(CHAT_HISTORY_LOCAL_KEY)
+        if (localHistory) {
+          const localData = JSON.parse(localHistory)
+          if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
+            console.log("[chat] Loaded history from localStorage:", localData.messages.length, "messages")
+            setMessages(localData.messages)
+          }
+        }
+      } catch (error) {
+        console.warn("[chat] Failed to load chat history:", error)
+      } finally {
+        setIsLoadingHistory(false)
+      }
     }
-  }, [setMessages])
 
-  const lastSaveRef = useRef<string>("")
+    loadHistory()
+  }, [user, currentDiagramId, selectedModel, setMessages])
+
+  // ============================================
+  // SAVE MESSAGES TO SUPABASE (debounced)
+  // ============================================
+  const saveToSupabaseRef = useRef<ReturnType<typeof debounce> | null>(null)
+  const lastSavedMessagesRef = useRef<string>("")
+  
+  useEffect(() => {
+    // Create debounced save function
+    saveToSupabaseRef.current = debounce(async (session: ChatSession, msgs: UIMessage[]) => {
+      if (!session || msgs.length === 0) return
+      
+      setIsSavingToCloud(true)
+      setCloudError(null)
+      
+      try {
+        // Clear existing messages and save all current ones
+        // This is simpler than trying to diff - Supabase is fast
+        await chatService.clearMessages(session.id)
+        
+        const dbMessages = msgs.map((msg) => chatService.convertToDbMessage(msg))
+        await chatService.saveMessages(session.id, dbMessages)
+        
+        setLastSavedToCloud(new Date())
+        console.log("[chat] Saved", msgs.length, "messages to Supabase")
+      } catch (error) {
+        console.error("[chat] Failed to save to Supabase:", error)
+        setCloudError("Failed to save to cloud")
+      } finally {
+        setIsSavingToCloud(false)
+      }
+    }, SAVE_DEBOUNCE_MS)
+    
+    return () => {
+      saveToSupabaseRef.current?.cancel()
+    }
+  }, [])
+
+  // ============================================
+  // SAVE MESSAGES ON CHANGE
+  // ============================================
   useEffect(() => {
     if (isLoadingHistory) return
     if (messages.length === 0) return
 
-    // Serialize messages for comparison and storage
-    // Filter out tool-related parts but keep text, file, and reasoning parts
-    const serializableMessages = messages.map((msg) => {
-      const anyMsg = msg as any
+    const messagesJson = JSON.stringify(messages.map(m => ({ id: m.id, role: m.role })))
+    if (messagesJson === lastSavedMessagesRef.current) return
+    lastSavedMessagesRef.current = messagesJson
 
-      // Filter parts to only serializable types (text, file, reasoning)
-      // Exclude tool-* parts as they contain non-serializable data
-      const serializableParts = msg.parts?.filter((part) => {
-        return part.type === "text" || part.type === "file" || part.type === "reasoning"
-      }).map((part) => {
-        // For file parts, ensure we have the URL
-        if (part.type === "file") {
-          const filePart = part as any
-          return {
-            type: "file",
-            url: filePart.url,
-            filename: filePart.filename,
-            mimeType: filePart.mimeType,
-          }
-        }
-        return part
-      })
+    // Save to Supabase if logged in
+    if (user && chatSession) {
+      saveToSupabaseRef.current?.(chatSession, messages)
+    }
 
-      return {
-        id: msg.id,
-        role: msg.role,
-        // For assistant messages, content might be in parts; for user, might be string
-        content: anyMsg.content || "",
-        createdAt: anyMsg.createdAt instanceof Date ? anyMsg.createdAt.toISOString() : anyMsg.createdAt,
-        // Include serializable parts
-        ...(serializableParts && serializableParts.length > 0 && { parts: serializableParts }),
-      }
-    })
-
-    const messagesJson = JSON.stringify(serializableMessages)
-    if (messagesJson === lastSaveRef.current) return
-    lastSaveRef.current = messagesJson
-
+    // Always save to localStorage as backup
     const timeoutId = setTimeout(() => {
       try {
+        const serializableMessages = messages.map((msg) => {
+          const anyMsg = msg as any
+          const serializableParts = msg.parts?.filter((part) => {
+            return part.type === "text" || part.type === "file" || part.type === "reasoning"
+          }).map((part) => {
+            if (part.type === "file") {
+              const filePart = part as any
+              return {
+                type: "file",
+                url: filePart.url,
+                filename: filePart.filename,
+                mimeType: filePart.mimeType,
+              }
+            }
+            return part
+          })
+
+          return {
+            id: msg.id,
+            role: msg.role,
+            content: anyMsg.content || "",
+            createdAt: anyMsg.createdAt instanceof Date ? anyMsg.createdAt.toISOString() : anyMsg.createdAt,
+            ...(serializableParts && serializableParts.length > 0 && { parts: serializableParts }),
+          }
+        })
+
         localStorage.setItem(CHAT_HISTORY_LOCAL_KEY, JSON.stringify({
           messages: serializableMessages,
           updatedAt: new Date().toISOString(),
         }))
-        console.log("[chat] Saved to localStorage:", serializableMessages.length, "messages")
       } catch (error) {
         console.warn("[chat] Failed to save to localStorage:", error)
       }
     }, 1000)
 
     return () => clearTimeout(timeoutId)
-  }, [messages, isLoadingHistory])
+  }, [messages, isLoadingHistory, user, chatSession])
 
-  const handleClearChat = () => {
+  // ============================================
+  // CLEAR CHAT
+  // ============================================
+  const handleClearChat = async () => {
     setMessages([])
-    lastSaveRef.current = ""
+    lastSavedMessagesRef.current = ""
 
+    // Clear from Supabase
+    if (user && chatSession) {
+      try {
+        await chatService.clearMessages(chatSession.id)
+        setLastSavedToCloud(new Date())
+      } catch (error) {
+        console.error("[chat] Failed to clear chat from Supabase:", error)
+      }
+    }
+
+    // Clear from localStorage
     try {
       localStorage.removeItem(CHAT_HISTORY_LOCAL_KEY)
     } catch (error) {
-      console.error("Failed to clear chat history on server:", error)
+      console.error("[chat] Failed to clear chat history:", error)
     }
   }
 
@@ -414,7 +509,6 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
       // Update CSS variable with current viewport height
       const vh = window.visualViewport?.height || window.innerHeight
       document.documentElement.style.setProperty("--app-height", `${vh}px`)
-      // Removed auto-scroll that was pushing header off-screen
     }
 
     handleResize()
@@ -450,7 +544,28 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     >
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-border flex-shrink-0">
-        <h2 className="font-semibold text-foreground">AI Diagram Assistant</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold text-foreground">AI Diagram Assistant</h2>
+          {/* Cloud sync indicator */}
+          {user && (
+            <div className="flex items-center" title={
+              cloudError ? cloudError : 
+              isSavingToCloud ? "Saving..." : 
+              lastSavedToCloud ? `Saved ${lastSavedToCloud.toLocaleTimeString()}` : 
+              "Not saved yet"
+            }>
+              {isSavingToCloud ? (
+                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+              ) : cloudError ? (
+                <CloudOff className="h-3 w-3 text-destructive" />
+              ) : lastSavedToCloud ? (
+                <Cloud className="h-3 w-3 text-green-500" />
+              ) : (
+                <CloudOff className="h-3 w-3 text-muted-foreground" />
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           <button
             onClick={handleClearChat}
