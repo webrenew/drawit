@@ -9,7 +9,7 @@
  */
 
 import { logger, task, metadata } from "@trigger.dev/sdk/v3"
-import { generateText } from "ai"
+import { generateText, tool } from "ai"
 import { gateway } from "@ai-sdk/gateway"
 import { z } from "zod"
 import { createClient } from "@supabase/supabase-js"
@@ -218,7 +218,7 @@ function layoutNetwork(
   topology: string,
   canvasInfo: CanvasInfo,
   centerNodeId?: string,
-  rootNodeId?: string
+  _rootNodeId?: string
 ): { elements: DiagramNode[]; connections: DiagramConnection[] } {
   const nodeWidth = 120
   const nodeHeight = 80
@@ -491,7 +491,7 @@ export const aiDiagramTask = task({
         system: getSystemPrompt(canvasInfo, theme),
         prompt,
         tools: {
-          createFlowchart: {
+          createFlowchart: tool({
             description: "Create a flowchart with connected nodes",
             parameters: createFlowchartSchema,
             execute: async (args) => {
@@ -501,8 +501,8 @@ export const aiDiagramTask = task({
               result.connections = layout.connections
               return JSON.stringify({ success: true, elementsCreated: layout.elements.length })
             },
-          },
-          createNetworkDiagram: {
+          }),
+          createNetworkDiagram: tool({
             description: "Create a network/architecture diagram",
             parameters: createNetworkDiagramSchema,
             execute: async (args) => {
@@ -512,8 +512,8 @@ export const aiDiagramTask = task({
               result.connections = layout.connections
               return JSON.stringify({ success: true, elementsCreated: layout.elements.length })
             },
-          },
-          createMindMap: {
+          }),
+          createMindMap: tool({
             description: "Create a mind map for brainstorming",
             parameters: createMindMapSchema,
             execute: async (args) => {
@@ -523,8 +523,8 @@ export const aiDiagramTask = task({
               result.connections = layout.connections
               return JSON.stringify({ success: true, elementsCreated: layout.elements.length })
             },
-          },
-          createOrgChart: {
+          }),
+          createOrgChart: tool({
             description: "Create an organizational chart",
             parameters: createOrgChartSchema,
             execute: async (args) => {
@@ -534,7 +534,7 @@ export const aiDiagramTask = task({
               result.connections = layout.connections
               return JSON.stringify({ success: true, elementsCreated: layout.elements.length })
             },
-          },
+          }),
         },
         maxSteps: 3,
       })
@@ -579,4 +579,3 @@ export const aiDiagramTask = task({
 // Export type for client usage
 export type AIDiagramTaskPayload = Parameters<typeof aiDiagramTask.trigger>[0]
 export type AIDiagramTaskResult = DiagramResult
-
