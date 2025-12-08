@@ -619,24 +619,42 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
 
     try {
       if (imagesToSend.length > 0) {
-        // AI SDK v6: sendMessage expects File[] or FileList, not FileUIPart[]
-        // The SDK automatically converts them to data URLs
-        const files = imagesToSend
-          .filter(img => img.file) // Only include items with actual File objects
-          .map(img => img.file as File)
-
-        console.log("[v0] Sending message with images:", files.length)
-
-        if (files.length > 0) {
-          sendMessage({
-            text: messageText || "Please analyze this image and recreate what you see.",
-            files: files,
+        // AI SDK v6: sendMessage uses content parts format
+        // { role: "user", content: [{ type: "text", text }, { type: "file", url, mediaType }] }
+        const dataUrls = await Promise.all(
+          imagesToSend.map(async (img) => {
+            if (img.file) {
+              return await fileToBase64(img.file)
+            }
+            return img.url
           })
+        )
+
+        console.log("[v0] Sending message with images:", dataUrls.length)
+
+        // Build content parts array
+        const contentParts: Array<{ type: "text"; text: string } | { type: "file"; url: string; mediaType: string }> = []
+        
+        // Add text part if present
+        if (messageText) {
+          contentParts.push({ type: "text", text: messageText })
         } else {
-          // Fallback: if no File objects, just send text
-          console.warn("[v0] No File objects available, sending text only")
-          sendMessage({ text: messageText || "Please analyze the uploaded content." })
+          contentParts.push({ type: "text", text: "Please analyze this image and recreate what you see." })
         }
+        
+        // Add file parts for each image
+        imagesToSend.forEach((img, i) => {
+          contentParts.push({
+            type: "file",
+            url: dataUrls[i],
+            mediaType: img.file?.type || "image/png",
+          })
+        })
+
+        sendMessage({
+          role: "user",
+          content: contentParts,
+        })
       } else {
         sendMessage({ text: messageText })
       }
