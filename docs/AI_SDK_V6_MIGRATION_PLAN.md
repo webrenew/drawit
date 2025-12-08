@@ -876,11 +876,11 @@ export async function POST(req: Request) {
 
 ### 5.1 Remove Deprecated Code
 
-- [ ] Delete `app/api/chat-history/route.ts`
-- [ ] Delete `app/api/upload/route.ts` (if using Blob for images)
-- [ ] Remove localStorage fallback logic from `ai-chat-panel.tsx`
-- [ ] Remove `@vercel/blob` from `package.json`
-- [ ] Remove `BLOB_READ_WRITE_TOKEN` from environment
+- [x] Delete `app/api/chat-history/route.ts` ✅ Deleted
+- [x] Remove `@vercel/blob` from `package.json` ✅ Removed
+- [x] Remove `BLOB_READ_WRITE_TOKEN` from environment ✅ Done
+- [ ] Remove localStorage fallback logic from `ai-chat-panel.tsx` (keep for offline support)
+- [ ] Delete `app/api/upload/route.ts` (needs reimplementation with Supabase Storage)
 
 ### 5.2 Test Cases
 
@@ -992,4 +992,36 @@ AI_GATEWAY_API_KEY=...
 
 *Last Updated: December 8, 2025*
 *Author: AI Assistant*
-*Status: Draft - Pending Review*
+*Status: Phase 4 Complete - In Production*
+
+---
+
+## Implementation Status
+
+### ✅ Completed
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 0: Supabase Setup | ✅ Complete | Schema, RLS, triggers, realtime enabled |
+| Phase 1: Authentication | ✅ Complete | Google OAuth working |
+| Phase 2: Diagram Persistence | ✅ Complete | Auto-save, DiagramPicker UI |
+| Phase 3: Chat History | ✅ Complete | ChatService, ChatHistorySheet UI |
+| Phase 4: AI Tool Refactor | ✅ Complete | Tools moved to `lib/tools/` |
+
+### ⏳ Pending
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Image upload with Supabase Storage | Pending | Currently disabled |
+| Remove localStorage fallback | Deferred | Keep for offline support |
+| AI SDK v6 server-side execution | Deferred | Client-side needed for canvas mutations |
+
+### Architecture Decision: Client-Side Tool Execution
+
+We chose to keep **client-side tool execution** instead of migrating to AI SDK v6's server-side execution because:
+
+1. **Canvas State Access**: Tools need direct access to Zustand store to create/update elements
+2. **Real-time Updates**: UI updates instantly when tools execute
+3. **Simpler Architecture**: No need to serialize/deserialize canvas state per request
+
+The `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` pattern handles multi-step reasoning client-side effectively.
