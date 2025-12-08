@@ -7,6 +7,7 @@
  * - Operations that may take > 30 seconds
  */
 
+import { tool } from "ai"
 import { z } from "zod"
 
 const runBackgroundDiagramSchema = z.object({
@@ -20,7 +21,7 @@ export const backgroundTools = {
    * Run a complex diagram generation in the background via Trigger.dev
    * Use when: Creating diagrams with 10+ nodes or complex relationships
    */
-  runBackgroundDiagram: {
+  runBackgroundDiagram: tool({
     description: `Run complex diagram generation as a background task. Use this when:
 - User requests a diagram with 10+ nodes
 - User asks for "detailed", "comprehensive", or "complete" diagrams
@@ -29,8 +30,7 @@ export const backgroundTools = {
 
 The task runs server-side with more time and resources. Results are applied to the canvas automatically.`,
     parameters: runBackgroundDiagramSchema,
-  },
+  }),
 }
 
 export type RunBackgroundDiagramArgs = z.infer<typeof runBackgroundDiagramSchema>
-
