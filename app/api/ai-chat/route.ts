@@ -1,7 +1,7 @@
 /**
- * AI Chat API Route - AI SDK v5 with Multi-Step Reasoning
+ * AI Chat API Route - AI SDK v6 Beta
  * Uses Vercel AI Gateway for model access
- * Based on https://sdk.vercel.ai/docs/ai-sdk-ui/chatbot-tool-usage
+ * Based on https://v6.ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage
  * 
  * Tool execution happens client-side via onToolCall in AIChatPanel.
  * This allows tools to directly mutate the canvas state.
@@ -13,6 +13,38 @@ import { gateway } from "@ai-sdk/gateway"
 import { allTools } from "@/lib/tools"
 
 export const maxDuration = 60
+
+/**
+ * Transform messages to handle file->image part conversion for v6 compatibility.
+ * The client sends `type: "file"` with `data` (base64), but v6 expects `type: "image"` 
+ * with `image` property for image content parts.
+ */
+function transformMessagesForV6(messages: UIMessage[]): UIMessage[] {
+  return messages.map((msg) => {
+    if (msg.role !== "user" || !msg.parts) {
+      return msg
+    }
+
+    const transformedParts = msg.parts.map((part: Record<string, unknown>) => {
+      // Transform file parts with image media types to image parts
+      if (part.type === "file" && typeof part.mediaType === "string" && part.mediaType.startsWith("image/")) {
+        const dataUrl = part.data || part.url
+        if (typeof dataUrl === "string") {
+          return {
+            type: "image" as const,
+            image: dataUrl, // base64 data URL
+          }
+        }
+      }
+      return part
+    })
+
+    return {
+      ...msg,
+      parts: transformedParts,
+    }
+  })
+}
 
 // System prompt for the diagram assistant
 function getSystemPrompt(
@@ -176,13 +208,16 @@ export async function POST(req: Request) {
 
     console.log("[ai-chat] Request - model:", selectedModelId, "messages:", messages.length)
 
+    // Transform messages to handle v5->v6 format differences (file->image parts)
+    const transformedMessages = transformMessagesForV6(messages)
+
     // Use Vercel AI Gateway for all models
     const model = gateway(selectedModelId)
 
     const result = streamText({
       model,
       system: getSystemPrompt(currentTheme, canvas),
-      messages: convertToModelMessages(messages),
+      messages: convertToModelMessages(transformedMessages),
       tools: allTools,
       // Multi-step reasoning is handled client-side via sendAutomaticallyWhen
       // in AIChatPanel. This allows tool execution to mutate client state.
