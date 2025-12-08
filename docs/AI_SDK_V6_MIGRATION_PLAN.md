@@ -1007,6 +1007,8 @@ AI_GATEWAY_API_KEY=...
 | Phase 2: Diagram Persistence | ✅ Complete | Auto-save, DiagramPicker UI |
 | Phase 3: Chat History | ✅ Complete | ChatService, ChatHistorySheet UI |
 | Phase 4: AI Tool Refactor | ✅ Complete | Tools moved to `lib/tools/` |
+| Phase 5: Trigger.dev Integration | ✅ Complete | Server-side execution via Quick Create |
+| Phase 6: System Prompt Architecture | ✅ Complete | Layered contract pattern |
 
 ### ⏳ Pending
 
@@ -1014,7 +1016,29 @@ AI_GATEWAY_API_KEY=...
 |------|--------|-------|
 | Image upload with Supabase Storage | Pending | Currently disabled |
 | Remove localStorage fallback | Deferred | Keep for offline support |
-| AI SDK v6 server-side execution | Deferred | Client-side needed for canvas mutations |
+
+### System Prompt Architecture
+
+The system prompt in `app/api/ai-chat/route.ts` uses a **layered contract architecture**:
+
+| Module | Purpose |
+|--------|---------|
+| ROLE & MISSION | Agent identity and primary objective |
+| CANVAS STATE | Dynamic context injection (center, dimensions, theme) |
+| TOOL REGISTRY | Decision matrix with "Use When" guidance for all 15 tools |
+| TOOL GOVERNANCE | Mandatory workflow, color rules, connection rules, multi-step limits |
+| NODE TYPES REFERENCE | Quick lookup for valid enum values |
+| COMMUNICATION CONTRACT | Response structure + tone guidelines |
+| IMAGE RECREATION | Step-by-step protocol for recreating uploaded images |
+| COMMON PATTERNS | User intent → tool sequence mapping |
+| HARD CONSTRAINTS | Inviolable rules (always connect, always check state, etc.) |
+
+**Key Improvements:**
+- **Tool Decision Matrix** - Clear "Use When" guidance prevents misuse of `createShape` over diagram tools
+- **Mandatory Workflow** - Enforces `getCanvasState` first, connections always, colors per-node
+- **Common Patterns** - Pre-mapped user intents to tool sequences reduce reasoning errors
+- **Hard Constraints** - Explicit "never do X" rules catch common failures
+- **Node Type Reference** - Inline enum values prevent hallucinated types
 
 ### Architecture Decision: Hybrid Tool Execution
 
