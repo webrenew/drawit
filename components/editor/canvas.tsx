@@ -47,6 +47,7 @@ const getTextAnchor = (textAlign: string | undefined): "start" | "middle" | "end
 }
 
 type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw"
+type LineHandle = "start" | "end"
 
 // Helper to sanitize elements for Liveblocks storage (removes undefined)
 const sanitizeElement = (element: CanvasElement): CanvasElement => {
@@ -111,6 +112,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   const [showImageDialog, setShowImageDialog] = useState(false)
   const [imageDialogPosition, setImageDialogPosition] = useState({ x: 0, y: 0 })
   const [resizeHandle, setResizeHandle] = useState<ResizeHandle | null>(null)
+  const [lineHandle, setLineHandle] = useState<LineHandle | null>(null)
   const [initialElementState, setInitialElementState] = useState<CanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const textAreaRef = useRef<HTMLTextAreaElement>(null)
@@ -667,14 +669,43 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   const renderResizeHandles = (element: CanvasElement) => {
     const { x, y, width, height } = element
     const handleSize = 8 / viewport.zoom
-    const handleStyle = {
-      width: handleSize,
-      height: handleSize,
-      fill: "var(--background)",
-      stroke: "var(--primary)",
-      strokeWidth: 1 / viewport.zoom,
+
+    // Special handling for lines and arrows - show endpoint handles
+    if ((element.type === "line" || element.type === "arrow") && element.points && element.points.length >= 2) {
+      const startPoint = element.points[0]
+      const endPoint = element.points[element.points.length - 1]
+      
+      const lineHandles: { handle: LineHandle; x: number; y: number }[] = [
+        { handle: "start", x: x + startPoint[0] - handleSize / 2, y: y + startPoint[1] - handleSize / 2 },
+        { handle: "end", x: x + endPoint[0] - handleSize / 2, y: y + endPoint[1] - handleSize / 2 },
+      ]
+
+      return (
+        <>
+          {lineHandles.map(({ handle, x: hx, y: hy }) => (
+            <circle
+              key={handle}
+              cx={hx + handleSize / 2}
+              cy={hy + handleSize / 2}
+              r={handleSize / 2}
+              fill="var(--background)"
+              stroke="var(--primary)"
+              strokeWidth={1 / viewport.zoom}
+              className="pointer-events-auto"
+              style={{ cursor: "move" }}
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                setLineHandle(handle)
+                setInitialElementState(element)
+                setLastMousePos({ x: e.clientX, y: e.clientY })
+              }}
+            />
+          ))}
+        </>
+      )
     }
 
+    // Standard resize handles for other shapes
     const handles: { handle: ResizeHandle; x: number; y: number }[] = [
       { handle: "nw", x: x - handleSize / 2, y: y - handleSize / 2 },
       { handle: "n", x: x + width / 2 - handleSize / 2, y: y - handleSize / 2 },
@@ -1018,6 +1049,48 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       return
     }
 
+    // Handle line/arrow endpoint dragging
+    if (lineHandle && initialElementState) {
+      const dx = (e.clientX - lastMousePos.x) / viewport.zoom
+      const dy = (e.clientY - lastMousePos.y) / viewport.zoom
+
+      updateElements((prev) =>
+        prev.map((el) => {
+          if (el.id !== initialElementState.id) return el
+          if (!el.points || el.points.length < 2) return el
+
+          const newPoints = [...el.points] as [number, number][]
+          
+          if (lineHandle === "start") {
+            // Move start point - also need to adjust element position
+            const newStartX = newPoints[0][0] + dx
+            const newStartY = newPoints[0][1] + dy
+            newPoints[0] = [newStartX, newStartY]
+            
+            // Normalize: move element origin to start point, adjust all points
+            const offsetX = newPoints[0][0]
+            const offsetY = newPoints[0][1]
+            const normalizedPoints = newPoints.map(([px, py]) => [px - offsetX, py - offsetY] as [number, number])
+            
+            return { 
+              ...el, 
+              x: el.x + offsetX, 
+              y: el.y + offsetY,
+              points: normalizedPoints 
+            }
+          } else {
+            // Move end point
+            const lastIdx = newPoints.length - 1
+            newPoints[lastIdx] = [newPoints[lastIdx][0] + dx, newPoints[lastIdx][1] + dy]
+            return { ...el, points: newPoints }
+          }
+        }),
+      )
+
+      setLastMousePos({ x: e.clientX, y: e.clientY })
+      return
+    }
+
     if (appState.selectionBox) {
       setAppState((prev) => ({
         ...prev,
@@ -1068,6 +1141,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   const handleMouseUp = () => {
     // setIsPanning(false) // Panning handled directly in mousemove
     setResizeHandle(null)
+    setLineHandle(null)
     setInitialElementState(null)
 
     if (appState.selectionBox) {
