@@ -80,10 +80,22 @@ pnpm install
    - Add redirect URI: `https://YOUR_PROJECT.supabase.co/auth/v1/callback`
    - Add Client ID and Secret to Supabase
 
-4. Create storage bucket:
+4. Run the storage migration:
+   ```bash
+   # Copy contents of supabase/migrations/002_temp_images_storage.sql
+   # Paste into SQL Editor and run
+   ```
+   This creates:
+   - `temp-images` bucket for AI chat image uploads
+   - `temp_images` table for tracking uploads
+   - Cleanup policies for expired images
+
+   Or manually create the bucket:
    - Go to **Storage** → **New Bucket**
-   - Name: `images`
+   - Name: `temp-images`
    - Public: Yes
+   - File size limit: 5MB
+   - Allowed types: image/png, image/jpeg, image/gif, image/webp
 
 ### 3. Environment Variables
 

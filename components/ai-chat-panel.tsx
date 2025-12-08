@@ -19,6 +19,7 @@ import { nanoid } from "nanoid"
 import type { UIMessage } from "@ai-sdk/react"
 import { useAuth } from "@/components/auth-provider"
 import { chatService, type ChatSession } from "@/lib/services/chat-service"
+import { imageService } from "@/lib/services/image-service"
 import { debounce } from "@/lib/utils/debounce"
 import { useAIDiagram } from "@/hooks/use-ai-diagram"
 
@@ -618,36 +619,53 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
     setUploadedImages([])
 
     try {
-      if (imagesToSend.length > 0) {
-        // AI SDK v6: sendMessage uses content parts format
-        // { role: "user", content: [{ type: "text", text }, { type: "file", url, mediaType }] }
-        const dataUrls = await Promise.all(
-          imagesToSend.map(async (img) => {
-            if (img.file) {
-              return await fileToBase64(img.file)
-            }
-            return img.url
+      if (imagesToSend.length > 0 && user) {
+        // Upload images to Supabase Storage and get public URLs
+        // This is much more efficient than sending base64 in the message
+        const filesToUpload = imagesToSend
+          .filter(img => img.file)
+          .map(img => img.file as File)
+
+        console.log("[v0] Uploading images to Supabase:", filesToUpload.length)
+
+        const uploadResults = await imageService.uploadImages(filesToUpload, user.id)
+        const successfulUploads = uploadResults.filter(r => r.success && r.url)
+
+        if (successfulUploads.length === 0) {
+          console.error("[v0] All image uploads failed")
+          // Fallback: try with base64
+          const dataUrls = await Promise.all(
+            imagesToSend.map(async (img) => img.file ? await fileToBase64(img.file) : img.url)
+          )
+          const contentParts: Array<{ type: "text"; text: string } | { type: "file"; url: string; mediaType: string }> = [
+            { type: "text", text: messageText || "Please analyze this image and recreate what you see." },
+          ]
+          imagesToSend.forEach((img, i) => {
+            contentParts.push({ type: "file", url: dataUrls[i], mediaType: img.file?.type || "image/png" })
           })
-        )
+          sendMessage({ role: "user", content: contentParts })
+          return
+        }
 
-        console.log("[v0] Sending message with images:", dataUrls.length)
+        console.log("[v0] Images uploaded, sending URLs:", successfulUploads.length)
 
-        // Build content parts array
+        // Build content parts with Supabase URLs (much smaller payload!)
         const contentParts: Array<{ type: "text"; text: string } | { type: "file"; url: string; mediaType: string }> = []
         
-        // Add text part if present
+        // Add text part
         if (messageText) {
           contentParts.push({ type: "text", text: messageText })
         } else {
           contentParts.push({ type: "text", text: "Please analyze this image and recreate what you see." })
         }
         
-        // Add file parts for each image
-        imagesToSend.forEach((img, i) => {
+        // Add file parts with Supabase URLs
+        successfulUploads.forEach((upload, i) => {
+          const originalImg = imagesToSend[i]
           contentParts.push({
             type: "file",
-            url: dataUrls[i],
-            mediaType: img.file?.type || "image/png",
+            url: upload.url!,
+            mediaType: originalImg?.file?.type || "image/png",
           })
         })
 
@@ -655,6 +673,19 @@ export function AIChatPanel({ onPreviewChange, canvasDimensions, onElementsCreat
           role: "user",
           content: contentParts,
         })
+      } else if (imagesToSend.length > 0 && !user) {
+        // Not logged in - use base64 fallback
+        console.log("[v0] User not logged in, using base64 fallback")
+        const dataUrls = await Promise.all(
+          imagesToSend.map(async (img) => img.file ? await fileToBase64(img.file) : img.url)
+        )
+        const contentParts: Array<{ type: "text"; text: string } | { type: "file"; url: string; mediaType: string }> = [
+          { type: "text", text: messageText || "Please analyze this image and recreate what you see." },
+        ]
+        imagesToSend.forEach((img, i) => {
+          contentParts.push({ type: "file", url: dataUrls[i], mediaType: img.file?.type || "image/png" })
+        })
+        sendMessage({ role: "user", content: contentParts })
       } else {
         sendMessage({ text: messageText })
       }

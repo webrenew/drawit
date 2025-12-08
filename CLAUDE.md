@@ -81,6 +81,11 @@ For complex diagrams that need longer execution time:
 
 - `diagram-service.ts` - CRUD operations for diagrams in Supabase
 - `chat-service.ts` - Chat session and message management in Supabase
+- `image-service.ts` - Upload images to Supabase Storage, returns public URLs for AI
+
+### Scheduled Tasks (Trigger.dev)
+
+- `src/trigger/cleanup-temp-images.ts` - Daily cleanup of expired temp images (runs at 3 AM UTC)
 
 ### Environment Variables
 
@@ -101,8 +106,14 @@ TRIGGER_SECRET_KEY=           # Trigger.dev secret for background jobs
 
 ### Database Schema
 
-See `supabase/migrations/001_initial_schema.sql` for full schema including:
+See `supabase/migrations/` for full schema:
+
+**001_initial_schema.sql:**
 - `profiles` - User profiles (extends Supabase auth)
 - `diagrams` - User diagrams with elements and connections
 - `chat_sessions` - AI chat sessions
 - `chat_messages` - Individual chat messages
+
+**002_temp_images_storage.sql:**
+- `temp-images` Storage bucket - For AI chat image uploads
+- `temp_images` table - Tracks uploads with 24h expiry for cleanup
