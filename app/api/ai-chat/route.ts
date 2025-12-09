@@ -280,7 +280,8 @@ export async function POST(req: Request) {
     return result.toUIMessageStreamResponse()
   } catch (error) {
     console.error("[ai-chat] API error:", error)
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
+    // Don't expose internal error details to client
+    return new Response(JSON.stringify({ error: "An error occurred processing your request" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     })

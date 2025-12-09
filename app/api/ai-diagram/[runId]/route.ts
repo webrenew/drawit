@@ -44,8 +44,14 @@ export async function GET(
     }
 
     // Check if the run belongs to this user (via metadata)
-    // Note: In production, you may want to store run ownership in your DB
-    
+    const runUserId = run.metadata?.userId as string | undefined
+    if (runUserId && runUserId !== user.id) {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      )
+    }
+
     const response: {
       runId: string
       status: string
@@ -68,8 +74,9 @@ export async function GET(
 
   } catch (error) {
     console.error("[ai-diagram-status] Error:", error)
+    // Don't expose internal error details to client
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to retrieve run status" },
       { status: 500 }
     )
   }
