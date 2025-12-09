@@ -28,12 +28,24 @@ export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
       if (toolCall.toolName === "createWorkflow") {
         const input = toolCall.input as {
           nodes: WorkflowConfig["nodes"]
-          edges: WorkflowConfig["edges"]
+          edges?: WorkflowConfig["edges"]
+          connections?: WorkflowConfig["connections"]
           autoLayout?: boolean
         }
 
         try {
-          canvasRef.current?.addWorkflow({ nodes: input.nodes, edges: input.edges }, input.autoLayout ?? true)
+          const edges =
+            input.edges && input.edges.length
+              ? input.edges
+              : (input.connections || []).map((connection, index) => ({
+                  id: `edge_${Date.now()}_${index}`,
+                  source: connection.from,
+                  target: connection.to,
+                  label: connection.label,
+                  animated: connection.animated ?? true,
+                }))
+
+          canvasRef.current?.addWorkflow({ nodes: input.nodes, edges }, input.autoLayout ?? true)
 
           addToolResult({
             tool: "createWorkflow",

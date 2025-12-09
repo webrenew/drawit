@@ -15,6 +15,13 @@ export interface WorkflowNodeData extends Record<string, unknown> {
 export type WorkflowNode = Node<WorkflowNodeData>
 export type WorkflowEdge = Edge
 
+export interface WorkflowConnection {
+  from: string
+  to: string
+  label?: string
+  animated?: boolean
+}
+
 export interface WorkflowState {
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
@@ -65,13 +72,14 @@ export interface WorkflowConfig {
     config?: Record<string, unknown>
     position?: { x: number; y: number }
   }[]
-  edges: {
+  edges?: {
     id?: string
     source: string
     target: string
     label?: string
     animated?: boolean
   }[]
+  connections?: WorkflowConnection[]
 }
 
 // The Dagre-based layout provides better, more consistent results

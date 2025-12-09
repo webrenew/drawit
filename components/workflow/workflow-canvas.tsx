@@ -25,6 +25,7 @@ import {
   type WorkflowEdge,
   type WorkflowNodeType as NodeType,
   type WorkflowConfig,
+  type WorkflowConnection,
 } from "@/lib/workflow-types"
 import { layoutWithDagre, beautifyLayout, analyzeLayoutQuality, type LayoutDirection } from "@/lib/layout/dagre-layout"
 import { cn } from "@/lib/utils"
@@ -51,7 +52,11 @@ let nodeId = 2
 const generateNodeId = () => `node_${nodeId++}`
 
 export interface WorkflowCanvasHandle {
-  addWorkflow: (config: WorkflowConfig, autoLayout?: boolean, direction?: "vertical" | "horizontal") => void
+  addWorkflow: (
+    config: WorkflowConfig,
+    autoLayout?: boolean,
+    direction?: "vertical" | "horizontal",
+  ) => void
   clearWorkflow: () => void
   getWorkflowState: () => { nodes: WorkflowNodeType[]; edges: WorkflowEdge[] }
   analyzeWorkflow: () => { issues: string[]; hasOverlaps: boolean; hasPoorSpacing: boolean; qualityScore: number }
@@ -73,6 +78,16 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
 
   useImperativeHandle(ref, () => ({
     addWorkflow: (config: WorkflowConfig, autoLayout = true, direction: "vertical" | "horizontal" = "vertical") => {
+      const normalizeConnections = (connections?: WorkflowConnection[]) =>
+        (connections || []).map((connection, index) => ({
+          id: `edge_${Date.now()}_${index}`,
+          source: connection.from,
+          target: connection.to,
+          label: connection.label,
+          animated: connection.animated ?? true,
+          style: { stroke: "#6366f1", strokeWidth: 2 },
+        }))
+
       // Create React Flow nodes from config
       let newNodes: WorkflowNodeType[] = config.nodes.map((node) => {
         const template = NODE_TEMPLATES[node.type]
@@ -95,14 +110,16 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
       })
 
       // Create React Flow edges
-      const newEdges: WorkflowEdge[] = config.edges.map((edge, index) => ({
-        id: edge.id || `edge_${Date.now()}_${index}`,
-        source: edge.source,
-        target: edge.target,
-        label: edge.label,
-        animated: edge.animated ?? true,
-        style: { stroke: "#6366f1", strokeWidth: 2 },
-      }))
+      const newEdges: WorkflowEdge[] = (config.edges?.length
+        ? config.edges.map((edge, index) => ({
+            id: edge.id || `edge_${Date.now()}_${index}`,
+            source: edge.source,
+            target: edge.target,
+            label: edge.label,
+            animated: edge.animated ?? true,
+            style: { stroke: "#6366f1", strokeWidth: 2 },
+          }))
+        : normalizeConnections(config.connections)) as WorkflowEdge[]
 
       if (autoLayout) {
         const dagreDirection: LayoutDirection = direction === "horizontal" ? "LR" : "TB"
