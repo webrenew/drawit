@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useMemo, useCallback, forwardRef, useImperativeHandle } from "react"
+import { useMemo, useCallback, forwardRef, useImperativeHandle, memo } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -11,15 +11,101 @@ import {
   getStraightPath,
   BaseEdge,
   EdgeLabelRenderer,
+  Handle,
+  Position,
   type Edge,
   type Node,
   type EdgeProps,
+  type NodeProps,
   MarkerType,
   ConnectionMode,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import type { CanvasElement, SmartConnection, Viewport, HandlePosition } from "@/lib/types"
 import { getSolidStrokeColor } from "@/lib/canvas-helpers"
+
+// Custom invisible node with handles at all 4 positions
+// React Flow edges require nodes to have Handle components with matching IDs
+interface InvisibleNodeData extends Record<string, unknown> {
+  width: number
+  height: number
+}
+
+const InvisibleNode = memo(function InvisibleNode({ data }: NodeProps<Node<InvisibleNodeData>>) {
+  const { width, height } = data
+  
+  return (
+    <div 
+      style={{ 
+        width, 
+        height, 
+        background: "transparent",
+        position: "relative",
+      }}
+    >
+      {/* Handle at top center */}
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="top"
+        style={{ 
+          opacity: 0, 
+          width: 1, 
+          height: 1,
+          top: 0,
+          left: "50%",
+          transform: "translateX(-50%)",
+          pointerEvents: "none",
+        }}
+      />
+      {/* Handle at bottom center */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="bottom"
+        style={{ 
+          opacity: 0, 
+          width: 1, 
+          height: 1,
+          bottom: 0,
+          left: "50%",
+          transform: "translateX(-50%)",
+          pointerEvents: "none",
+        }}
+      />
+      {/* Handle at left center */}
+      <Handle
+        type="source"
+        position={Position.Left}
+        id="left"
+        style={{ 
+          opacity: 0, 
+          width: 1, 
+          height: 1,
+          left: 0,
+          top: "50%",
+          transform: "translateY(-50%)",
+          pointerEvents: "none",
+        }}
+      />
+      {/* Handle at right center */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="right"
+        style={{ 
+          opacity: 0, 
+          width: 1, 
+          height: 1,
+          right: 0,
+          top: "50%",
+          transform: "translateY(-50%)",
+          pointerEvents: "none",
+        }}
+      />
+    </div>
+  )
+})
 
 // Custom edge component with styling support
 function CustomEdge({
@@ -111,6 +197,10 @@ function CustomEdge({
 
 const edgeTypes = {
   custom: CustomEdge,
+}
+
+const nodeTypes = {
+  invisible: InvisibleNode,
 }
 
 // Map handle position to React Flow position
@@ -210,20 +300,15 @@ export const SmartConnectorLayer = forwardRef<SmartConnectorLayerHandle, SmartCo
     ref,
   ) {
     // Convert canvas elements to React Flow nodes (invisible, just for positioning)
-    const nodes: Node[] = useMemo(() => {
+    // Uses custom InvisibleNode type with handles at all 4 positions (top/right/bottom/left)
+    const nodes: Node<InvisibleNodeData>[] = useMemo(() => {
       return elements
         .filter((el) => el.type !== "arrow" && el.type !== "line" && el.type !== "freedraw")
         .map((el) => ({
           id: el.id,
-          type: "default",
+          type: "invisible", // Custom node type with handles
           position: { x: el.x, y: el.y },
-          data: { label: "", width: el.width, height: el.height },
-          style: {
-            width: el.width,
-            height: el.height,
-            opacity: 0, // Invisible - we just use this for edge anchoring
-            pointerEvents: "none" as const,
-          },
+          data: { width: el.width, height: el.height },
           selectable: false,
           draggable: false,
         }))
@@ -315,6 +400,7 @@ export const SmartConnectorLayer = forwardRef<SmartConnectorLayerHandle, SmartCo
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}

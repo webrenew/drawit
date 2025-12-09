@@ -1703,7 +1703,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
             connections={connections}
             viewport={viewport}
             selectedConnectionId={selectedConnectionId}
-            isDarkMode={resolvedTheme !== "dark"}
+            isDarkMode={resolvedTheme === "dark"}
             onConnectionSelect={handleConnectionClick}
           />
 
