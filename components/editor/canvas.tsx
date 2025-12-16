@@ -1698,15 +1698,6 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
             </svg>
           </div>
 
-          <SmartConnectorLayer
-            elements={elements}
-            connections={connections}
-            viewport={viewport}
-            selectedConnectionId={selectedConnectionId}
-            isDarkMode={resolvedTheme === "dark"}
-            onConnectionSelect={handleConnectionClick}
-          />
-
           <div
             ref={canvasRef} // Assign ref to the canvas div
             className="absolute inset-0 touch-none"
@@ -1717,6 +1708,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
               transformOrigin: "0 0",
               width: "100%",
               height: "100%",
+              zIndex: 1,
             }}
           >
             <svg className="w-full h-full overflow-visible pointer-events-none">
@@ -2315,6 +2307,15 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
               }
             </svg>
           </div>
+
+          <SmartConnectorLayer
+            elements={elements}
+            connections={connections}
+            viewport={viewport}
+            selectedConnectionId={selectedConnectionId}
+            isDarkMode={resolvedTheme === "dark"}
+            onConnectionSelect={handleConnectionClick}
+          />
         </div>
       </div>
 

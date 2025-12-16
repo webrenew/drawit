@@ -427,6 +427,7 @@ export const SmartConnectorLayer = forwardRef<SmartConnectorLayerHandle, SmartCo
         style={{
           transform: `translate(${viewport.x * viewport.zoom}px, ${viewport.y * viewport.zoom}px) scale(${viewport.zoom})`,
           transformOrigin: "0 0",
+          zIndex: 2, // Render on top of canvas elements (which have zIndex: 1)
         }}
       >
         <ReactFlowProvider>
