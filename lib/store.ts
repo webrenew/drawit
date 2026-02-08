@@ -33,6 +33,7 @@ interface CanvasState {
 
   // Bulk actions
   clearAll: () => void
+  setCanvasState: (elements: CanvasElement[], connections: SmartConnection[]) => void
 
   // Diagram persistence actions
   loadDiagram: (id: string) => Promise<void>
@@ -54,6 +55,8 @@ let isAutoCreating = false
 export const useCanvasStore = create<CanvasState>()(
   persist(
     (set, get) => {
+      let hasPendingSave = false
+
       // Auto-create diagram for logged-in users
       const ensureDiagramExists = async () => {
         const state = get()
@@ -96,7 +99,15 @@ export const useCanvasStore = create<CanvasState>()(
       // Save to Supabase
       const saveToSupabase = async () => {
         const state = get()
-        if (!state.currentDiagramId || state.isSaving) return
+        if (!state.currentDiagramId) {
+          hasPendingSave = false
+          return
+        }
+
+        if (state.isSaving) {
+          hasPendingSave = true
+          return
+        }
 
         set({ isSaving: true, saveError: null })
         try {
@@ -112,6 +123,11 @@ export const useCanvasStore = create<CanvasState>()(
             isSaving: false, 
             saveError: error instanceof Error ? error.message : "Save failed" 
           })
+        } finally {
+          if (hasPendingSave) {
+            hasPendingSave = false
+            void saveToSupabase()
+          }
         }
       }
 
@@ -190,6 +206,13 @@ export const useCanvasStore = create<CanvasState>()(
 
         clearAll: () => {
           set({ elements: [], connections: [] })
+          if (get().currentDiagramId) {
+            debouncedAutoSave?.()
+          }
+        },
+
+        setCanvasState: (elements, connections) => {
+          set({ elements, connections })
           if (get().currentDiagramId) {
             debouncedAutoSave?.()
           }

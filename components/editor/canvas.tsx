@@ -75,6 +75,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   const updateElements = useCanvasStore((state) => state.updateElements)
   const addConnection = useCanvasStore((state) => state.addConnection)
   const updateConnections = useCanvasStore((state) => state.updateConnections)
+  const setCanvasState = useCanvasStore((state) => state.setCanvasState)
 
   const getInitialState = (): AppState => ({
     tool: "selection",
@@ -205,13 +206,18 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
     appStateRef.current = appState
   }, [appState])
 
-  const historyRef = useRef<CanvasElement[][]>([])
+  type CanvasHistoryEntry = {
+    elements: CanvasElement[]
+    connections: SmartConnection[]
+  }
+
+  const historyRef = useRef<CanvasHistoryEntry[]>([])
   const historyIndexRef = useRef(-1)
   const isUndoRedoRef = useRef(false)
   const MAX_HISTORY = 50
   const historyInitializedRef = useRef(false)
 
-  const saveToHistory = useCallback((currentElements: CanvasElement[]) => {
+  const saveToHistory = useCallback((currentElements: CanvasElement[], currentConnections: SmartConnection[]) => {
     if (isUndoRedoRef.current) {
       isUndoRedoRef.current = false
       console.log("[v0] Skipping history save (undo/redo in progress)")
@@ -223,9 +229,12 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1)
     }
 
-    // Deep clone the elements to avoid reference issues
-    const clonedElements = JSON.parse(JSON.stringify(currentElements))
-    historyRef.current.push(clonedElements)
+    // Deep clone to avoid reference issues with mutable objects
+    const clonedState: CanvasHistoryEntry = {
+      elements: JSON.parse(JSON.stringify(currentElements)),
+      connections: JSON.parse(JSON.stringify(currentConnections)),
+    }
+    historyRef.current.push(clonedState)
 
     // Limit history size
     if (historyRef.current.length > MAX_HISTORY) {
@@ -243,14 +252,20 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       historyIndexRef.current--
       isUndoRedoRef.current = true
       const previousState = historyRef.current[historyIndexRef.current]
-      console.log("[v0] Undoing to state with", previousState.length, "elements")
+      console.log(
+        "[v0] Undoing to state with",
+        previousState.elements.length,
+        "elements and",
+        previousState.connections.length,
+        "connections",
+      )
 
-      updateElements(() => previousState)
+      setCanvasState(previousState.elements, previousState.connections)
       setAppState((prev) => ({ ...prev, selection: [] }))
     } else {
       console.log("[v0] Cannot undo - at beginning of history")
     }
-  }, [updateElements, setAppState])
+  }, [setCanvasState, setAppState])
 
   const redo = useCallback(() => {
     console.log("[v0] Redo called - index:", historyIndexRef.current, "history length:", historyRef.current.length)
@@ -258,50 +273,79 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       historyIndexRef.current++
       isUndoRedoRef.current = true
       const nextState = historyRef.current[historyIndexRef.current]
-      console.log("[v0] Redoing to state with", nextState.length, "elements")
+      console.log(
+        "[v0] Redoing to state with",
+        nextState.elements.length,
+        "elements and",
+        nextState.connections.length,
+        "connections",
+      )
 
-      updateElements(() => nextState)
+      setCanvasState(nextState.elements, nextState.connections)
       setAppState((prev) => ({ ...prev, selection: [] }))
     } else {
       console.log("[v0] Cannot redo - at end of history")
     }
-  }, [updateElements, setAppState])
+  }, [setCanvasState, setAppState])
 
-  const prevElementsRef = useRef<string>("")
+  const prevCanvasSnapshotRef = useRef<string>("")
 
   useEffect(() => {
     if (!elements || !Array.isArray(elements)) return
 
-    const currentSnapshot = JSON.stringify(elements)
+    const currentSnapshot = JSON.stringify({
+      elements,
+      connections,
+    })
 
     // Initialize history with first state (only once)
     if (!historyInitializedRef.current) {
-      historyRef.current = [JSON.parse(JSON.stringify(elements))]
+      historyRef.current = [
+        {
+          elements: JSON.parse(JSON.stringify(elements)),
+          connections: JSON.parse(JSON.stringify(connections)),
+        },
+      ]
       historyIndexRef.current = 0
-      prevElementsRef.current = currentSnapshot
+      prevCanvasSnapshotRef.current = currentSnapshot
       historyInitializedRef.current = true
-      console.log("[v0] History initialized with", elements.length, "elements")
+      console.log(
+        "[v0] History initialized with",
+        elements.length,
+        "elements and",
+        connections.length,
+        "connections",
+      )
       return
     }
 
     // Skip if this is an undo/redo operation
     if (isUndoRedoRef.current) {
-      prevElementsRef.current = currentSnapshot
+      prevCanvasSnapshotRef.current = currentSnapshot
+      isUndoRedoRef.current = false
       return
     }
 
-    // Save to history if elements changed
-    if (currentSnapshot !== prevElementsRef.current) {
+    // Save to history if elements or connections changed
+    if (currentSnapshot !== prevCanvasSnapshotRef.current) {
+      const previousSnapshot = prevCanvasSnapshotRef.current
+        ? (JSON.parse(prevCanvasSnapshotRef.current) as CanvasHistoryEntry)
+        : { elements: [], connections: [] }
+
       console.log(
         "[v0] Elements changed, saving to history. Old count:",
-        prevElementsRef.current ? JSON.parse(prevElementsRef.current).length : 0,
-        "New count:",
+        previousSnapshot.elements.length,
+        "New element count:",
         elements.length,
+        "Old connection count:",
+        previousSnapshot.connections.length,
+        "New connection count:",
+        connections.length,
       )
-      saveToHistory(elements)
-      prevElementsRef.current = currentSnapshot
+      saveToHistory(elements, connections)
+      prevCanvasSnapshotRef.current = currentSnapshot
     }
-  }, [elements, saveToHistory])
+  }, [elements, connections, saveToHistory])
 
   const handleAction = useCallback(
     (action: string) => {
@@ -309,7 +353,24 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       const currentSelection = appStateRef.current.selection
 
       if (action === "delete") {
-        if (currentSelection.length === 0) return
+        let didDeleteSomething = false
+        if (selectedConnectionId) {
+          updateConnections((prev) => prev.filter((conn) => conn.id !== selectedConnectionId))
+          setSelectedConnectionId(null)
+          didDeleteSomething = true
+        }
+
+        if (currentSelection.length === 0) {
+          if (!didDeleteSomething) return
+          setAppState((prev) => ({ ...prev, selection: [] }))
+          return
+        }
+
+        const deletableElementIds = new Set(
+          elements.filter((el) => currentSelection.includes(el.id) && !el.isLocked).map((el) => el.id),
+        )
+        if (deletableElementIds.size === 0) return
+        didDeleteSomething = true
 
         console.log("[v0] Deleting elements:", currentSelection)
         updateElements((prev) => {
@@ -319,9 +380,9 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
             prev.slice(0, 3).map((e) => ({ id: e.id, type: e.type, locked: e.isLocked })),
           )
 
-          const filtered = prev.filter((el) => {
-            const inSelection = currentSelection.includes(el.id)
-            const shouldDelete = inSelection && !el.isLocked
+            const filtered = prev.filter((el) => {
+              const inSelection = currentSelection.includes(el.id)
+              const shouldDelete = inSelection && !el.isLocked
 
             if (inSelection) {
               console.log("[v0] Element", el.id, "in selection, locked:", el.isLocked, "will delete:", shouldDelete)
@@ -338,6 +399,10 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
           )
           return filtered
         })
+        updateConnections((prev) =>
+          prev.filter((conn) => !deletableElementIds.has(conn.sourceId) && !deletableElementIds.has(conn.targetId)),
+        )
+        setSelectedConnectionId(null)
         setAppState((prev) => ({ ...prev, selection: [] }))
       } else if (action === "duplicate") {
         const newElements: CanvasElement[] = []
@@ -402,7 +467,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         )
       }
     },
-    [updateElements, elements, addElement],
+    [updateElements, updateConnections, selectedConnectionId, elements, addElement],
   ) // Added proper dependencies for useCallback
 
   useEffect(() => {
@@ -444,8 +509,8 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
               const clientY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2
 
               // Convert to canvas coordinates
-              const x = (clientX - (rect?.left || 0) - viewport.x) / viewport.zoom
-              const y = (clientY - (rect?.top || 0) - viewport.y) / viewport.zoom
+              const x = (clientX - (rect?.left || 0)) / viewport.zoom - viewport.x
+              const y = (clientY - (rect?.top || 0)) / viewport.zoom - viewport.y
 
               const newElement = createElement(id, x - 100, y - 100, "image")
               newElement.width = 200
@@ -516,8 +581,13 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       }
 
       if (e.key === "Backspace" || e.key === "Delete") {
-        console.log("[v0] Delete key pressed, selection length:", appState.selection.length)
-        if (appState.selection.length > 0) {
+        console.log(
+          "[v0] Delete key pressed, selection length:",
+          appState.selection.length,
+          "selectedConnectionId:",
+          selectedConnectionId,
+        )
+        if (appState.selection.length > 0 || selectedConnectionId) {
           e.preventDefault()
           console.log("[v0] Calling handleAction('delete')")
           handleAction("delete")
@@ -527,7 +597,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [appState.selection, editingId, handleAction, elements, setAppState, undo, redo]) // Added undo, redo as dependencies
+  }, [appState.selection, editingId, handleAction, elements, selectedConnectionId, setAppState, undo, redo]) // Added undo, redo as dependencies
 
   // --- Helpers ---
 
@@ -807,7 +877,12 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
     if (appState.tool === "eraser") {
       const clickedElement = [...elements].reverse().find((el) => isPointInElement(x, y, el) && !el.isLocked)
       if (clickedElement) {
+        const deletedElementId = clickedElement.id
         updateElements((prev) => prev.filter((el) => el.id !== clickedElement.id))
+        updateConnections((prev) =>
+          prev.filter((conn) => conn.sourceId !== deletedElementId && conn.targetId !== deletedElementId),
+        )
+        setSelectedConnectionId(null)
       }
       return
     }
@@ -819,7 +894,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
     }
 
     if (appState.tool === "selection") {
-      const clickedElement = [...elements].reverse().find((el) => isPointInElement(x, y, el) && !el.isLocked)
+      const clickedElement = [...elements].reverse().find((el) => isPointInElement(x, y, el))
 
       if (clickedElement) {
         const groupIds = clickedElement.groupId
@@ -835,14 +910,15 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
           setAppState((prev) => ({
             ...prev,
             selection: newSelection,
-            isDragging: true,
+            isDragging: !groupIds.every((id) => elements.find((el) => el.id === id)?.isLocked),
           }))
         } else {
           // Regular click - select group or single element
+          const allSelectedLocked = groupIds.every((id) => elements.find((el) => el.id === id)?.isLocked)
           setAppState((prev) => ({
             ...prev,
             selection: groupIds,
-            isDragging: true,
+            isDragging: !allSelectedLocked,
             currentItemStrokeColor: clickedElement.strokeColor,
             currentItemBackgroundColor: clickedElement.backgroundColor,
             currentItemStrokeWidth: clickedElement.strokeWidth,
@@ -1149,7 +1225,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
     if (appState.selectionBox) {
       const selectedIds = elements
-        .filter((el) => isElementInSelectionBox(el, appState.selectionBox!) && !el.isLocked)
+        .filter((el) => isElementInSelectionBox(el, appState.selectionBox!))
         .map((el) => el.id)
 
       const expandedSelection = new Set<string>()
@@ -1340,6 +1416,8 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       if (updates.currentItemStrokeColor !== undefined) updatedProps.strokeColor = updates.currentItemStrokeColor
       if (updates.currentItemStrokeWidth !== undefined) updatedProps.strokeWidth = updates.currentItemStrokeWidth
       if (updates.currentItemStrokeStyle !== undefined) updatedProps.strokeStyle = updates.currentItemStrokeStyle
+      if (updates.currentItemArrowHeadStart !== undefined) updatedProps.arrowHeadStart = updates.currentItemArrowHeadStart
+      if (updates.currentItemArrowHeadEnd !== undefined) updatedProps.arrowHeadEnd = updates.currentItemArrowHeadEnd
 
       if (Object.keys(updatedProps).length > 0) {
         console.log("[v0] Applying updates to connection:", updatedProps)
@@ -1899,33 +1977,43 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
                       {el.type === "arrow" && el.points && el.points.length > 0 && (
                         <g>
-                          <line
-                            x1={el.x + el.points[0][0]}
-                            y1={el.y + el.points[0][1]}
-                            x2={el.x + el.points[el.points.length - 1][0]}
-                            y2={el.y + el.points[el.points.length - 1][1]}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth || 2}
-                            strokeDasharray={strokeDasharray}
-                            opacity={normalizeOpacity(el.opacity)}
-                            strokeLinecap="round"
-                          />
-                          {renderArrowHead(
-                            el.x + el.points[el.points.length - 1][0],
-                            el.y + el.points[el.points.length - 1][1],
-                            el.angle,
-                            el.arrowHeadEnd,
-                            strokeColorValue,
-                            el.strokeWidth,
-                          )}
-                          {renderArrowHead(
-                            el.x + el.points[0][0],
-                            el.y + el.points[0][1],
-                            el.angle,
-                            el.arrowHeadStart,
-                            strokeColorValue,
-                            el.strokeWidth,
-                          )}
+                          {(() => {
+                            const startPoint = el.points[0]
+                            const endPoint = el.points[el.points.length - 1]
+                            const lineAngle = Math.atan2(endPoint[1] - startPoint[1], endPoint[0] - startPoint[0])
+
+                            return (
+                              <>
+                                <line
+                                  x1={el.x + startPoint[0]}
+                                  y1={el.y + startPoint[1]}
+                                  x2={el.x + endPoint[0]}
+                                  y2={el.y + endPoint[1]}
+                                  stroke={strokeColorValue}
+                                  strokeWidth={el.strokeWidth || 2}
+                                  strokeDasharray={strokeDasharray}
+                                  opacity={normalizeOpacity(el.opacity)}
+                                  strokeLinecap="round"
+                                />
+                                {renderArrowHead(
+                                  el.x + endPoint[0],
+                                  el.y + endPoint[1],
+                                  lineAngle,
+                                  el.arrowHeadEnd,
+                                  strokeColorValue,
+                                  el.strokeWidth,
+                                )}
+                                {renderArrowHead(
+                                  el.x + startPoint[0],
+                                  el.y + startPoint[1],
+                                  lineAngle + Math.PI,
+                                  el.arrowHeadStart,
+                                  strokeColorValue,
+                                  el.strokeWidth,
+                                )}
+                              </>
+                            )
+                          })()}
                         </g>
                       )}
 
@@ -2048,7 +2136,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
                         />
                       )}
 
-                      {isSelected && renderResizeHandles(el)}
+                      {isSelected && !el.isLocked && renderResizeHandles(el)}
                     </g>
                   )
                 })
@@ -2220,32 +2308,42 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
                       {el.type === "arrow" && el.points && el.points.length > 0 && (
                         <g>
-                          <line
-                            x1={el.x + el.points[0][0]}
-                            y1={el.y + el.points[0][1]}
-                            x2={el.x + el.points[el.points.length - 1][0]}
-                            y2={el.y + el.points[el.points.length - 1][1]}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth || 2}
-                            strokeDasharray="4 4"
-                            opacity={normalizeOpacity(el.opacity) * 0.7}
-                          />
-                          {renderArrowHead(
-                            el.x + el.points[el.points.length - 1][0],
-                            el.y + el.points[el.points.length - 1][1],
-                            el.angle,
-                            el.arrowHeadEnd,
-                            strokeColorValue,
-                            el.strokeWidth,
-                          )}
-                          {renderArrowHead(
-                            el.x + el.points[0][0],
-                            el.y + el.points[0][1],
-                            el.angle,
-                            el.arrowHeadStart,
-                            strokeColorValue,
-                            el.strokeWidth,
-                          )}
+                          {(() => {
+                            const startPoint = el.points[0]
+                            const endPoint = el.points[el.points.length - 1]
+                            const lineAngle = Math.atan2(endPoint[1] - startPoint[1], endPoint[0] - startPoint[0])
+
+                            return (
+                              <>
+                                <line
+                                  x1={el.x + startPoint[0]}
+                                  y1={el.y + startPoint[1]}
+                                  x2={el.x + endPoint[0]}
+                                  y2={el.y + endPoint[1]}
+                                  stroke={strokeColorValue}
+                                  strokeWidth={el.strokeWidth || 2}
+                                  strokeDasharray="4 4"
+                                  opacity={normalizeOpacity(el.opacity) * 0.7}
+                                />
+                                {renderArrowHead(
+                                  el.x + endPoint[0],
+                                  el.y + endPoint[1],
+                                  lineAngle,
+                                  el.arrowHeadEnd,
+                                  strokeColorValue,
+                                  el.strokeWidth,
+                                )}
+                                {renderArrowHead(
+                                  el.x + startPoint[0],
+                                  el.y + startPoint[1],
+                                  lineAngle + Math.PI,
+                                  el.arrowHeadStart,
+                                  strokeColorValue,
+                                  el.strokeWidth,
+                                )}
+                              </>
+                            )
+                          })()}
                         </g>
                       )}
 

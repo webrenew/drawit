@@ -50,7 +50,7 @@ import {
   ConnectionMode,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import type { CanvasElement, SmartConnection, Viewport, HandlePosition } from "@/lib/types"
+import type { CanvasElement, SmartConnection, Viewport, HandlePosition, ArrowHeadType } from "@/lib/types"
 import { getSolidStrokeColor } from "@/lib/canvas-helpers"
 
 /**
@@ -154,13 +154,24 @@ function CustomEdge({
   markerStart,
   selected,
 }: EdgeProps) {
-  const edgeData = data as { pathType?: string; strokeColor?: string; strokeWidth?: number; strokeStyle?: string; animated?: boolean; label?: string } | undefined
+  const edgeData = data as {
+    pathType?: string
+    strokeColor?: string
+    strokeWidth?: number
+    strokeStyle?: string
+    animated?: boolean
+    label?: string
+    arrowHeadStart?: ArrowHeadType
+    arrowHeadEnd?: ArrowHeadType
+  } | undefined
   const pathType = edgeData?.pathType || "smoothstep"
   const strokeColor = edgeData?.strokeColor || "#6366f1"
   const strokeWidth = edgeData?.strokeWidth || 2
   const strokeStyle = edgeData?.strokeStyle || "solid"
   const animated = edgeData?.animated || false
   const label = edgeData?.label
+  const arrowHeadStart = edgeData?.arrowHeadStart
+  const arrowHeadEnd = edgeData?.arrowHeadEnd
 
   let edgePath: string
   let labelX: number
@@ -195,6 +206,36 @@ function CustomEdge({
   }
 
   const strokeDasharray = strokeStyle === "dashed" ? "8 4" : strokeStyle === "dotted" ? "2 4" : undefined
+  const lineAngle = Math.atan2(targetY - sourceY, targetX - sourceX)
+
+  const renderEndpointMarker = (x: number, y: number, angle: number, markerType?: ArrowHeadType) => {
+    if (!markerType || markerType === "none" || markerType === "arrow") return null
+
+    const size = Math.max(strokeWidth * 2, 4)
+
+    if (markerType === "dot") {
+      return <circle cx={x} cy={y} r={size * 0.6} fill={strokeColor} />
+    }
+
+    if (markerType === "bar") {
+      const halfLength = size
+      const cos = Math.cos(angle + Math.PI / 2)
+      const sin = Math.sin(angle + Math.PI / 2)
+      return (
+        <line
+          x1={x + cos * halfLength}
+          y1={y + sin * halfLength}
+          x2={x - cos * halfLength}
+          y2={y - sin * halfLength}
+          stroke={strokeColor}
+          strokeWidth={strokeWidth * 1.4}
+          strokeLinecap="round"
+        />
+      )
+    }
+
+    return null
+  }
 
   return (
     <>
@@ -210,6 +251,8 @@ function CustomEdge({
         }}
         className={animated ? "animated-edge" : ""}
       />
+      {renderEndpointMarker(sourceX, sourceY, lineAngle + Math.PI, arrowHeadStart)}
+      {renderEndpointMarker(targetX, targetY, lineAngle, arrowHeadEnd)}
       {label && (
         <EdgeLabelRenderer>
           <div
@@ -372,14 +415,14 @@ export const SmartConnectorLayer = forwardRef<SmartConnectorLayerHandle, SmartCo
           type: "custom",
           selected: conn.id === selectedConnectionId,
           markerEnd:
-            conn.arrowHeadEnd !== "none"
+            conn.arrowHeadEnd === "arrow"
               ? {
                 type: MarkerType.ArrowClosed,
                 color: conn.strokeColor ? getSolidStrokeColor(conn.strokeColor) : (isDarkMode ? "#ffffff" : "#6366f1"),
               }
               : undefined,
           markerStart:
-            conn.arrowHeadStart && conn.arrowHeadStart !== "none"
+            conn.arrowHeadStart === "arrow"
               ? {
                 type: MarkerType.ArrowClosed,
                 color: conn.strokeColor ? getSolidStrokeColor(conn.strokeColor) : (isDarkMode ? "#ffffff" : "#6366f1"),
@@ -392,6 +435,8 @@ export const SmartConnectorLayer = forwardRef<SmartConnectorLayerHandle, SmartCo
             strokeStyle: conn.strokeStyle || "solid",
             animated: conn.animated || false,
             label: conn.label,
+            arrowHeadStart: conn.arrowHeadStart,
+            arrowHeadEnd: conn.arrowHeadEnd,
           },
         }
       })

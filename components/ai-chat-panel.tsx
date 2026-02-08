@@ -429,11 +429,32 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     },
   })
 
+  const saveToSupabaseRef = useRef<ReturnType<typeof debounce> | null>(null)
+  const lastSavedMessagesRef = useRef<string>("")
+  const cloudSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const latestCloudSaveRequestRef = useRef(0)
+
+  const invalidatePendingCloudSaves = useCallback(() => {
+    latestCloudSaveRequestRef.current += 1
+    saveToSupabaseRef.current?.cancel()
+    setIsSavingToCloud(false)
+  }, [])
+
+  const getMessagesFingerprint = useCallback((msgs: UIMessage[]) => {
+    return JSON.stringify(
+      msgs.map((msg) => ({
+        id: msg.id,
+        ...chatService.convertToDbMessage(msg),
+      })),
+    )
+  }, [])
+
   // ============================================
   // LOAD CHAT HISTORY
   // ============================================
   useEffect(() => {
     const loadHistory = async () => {
+      invalidatePendingCloudSaves()
       setIsLoadingHistory(true)
 
       // If user is logged in, try to load from Supabase
@@ -448,8 +469,12 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
           if (dbMessages.length > 0) {
             const aiMessages = chatService.convertFromDbMessages(dbMessages)
             setMessages(aiMessages)
+            lastSavedMessagesRef.current = getMessagesFingerprint(aiMessages)
             console.log("[chat] Loaded", dbMessages.length, "messages from Supabase")
             setLastSavedToCloud(new Date())
+          } else {
+            setMessages([])
+            lastSavedMessagesRef.current = ""
           }
 
           // Auto-name session and diagram if they're still default and we have messages
@@ -488,7 +513,14 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
           if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
             console.log("[chat] Loaded history from localStorage:", localData.messages.length, "messages")
             setMessages(localData.messages)
+            lastSavedMessagesRef.current = getMessagesFingerprint(localData.messages)
+          } else {
+            setMessages([])
+            lastSavedMessagesRef.current = ""
           }
+        } else {
+          setMessages([])
+          lastSavedMessagesRef.current = ""
         }
       } catch (error) {
         console.warn("[chat] Failed to load chat history:", error)
@@ -498,42 +530,61 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     }
 
     loadHistory()
-  }, [user, currentDiagramId, selectedModel, setMessages])
+  }, [user, currentDiagramId, selectedModel, setMessages, invalidatePendingCloudSaves, getMessagesFingerprint])
 
   // ============================================
   // SAVE MESSAGES TO SUPABASE (debounced)
   // ============================================
-  const saveToSupabaseRef = useRef<ReturnType<typeof debounce> | null>(null)
-  const lastSavedMessagesRef = useRef<string>("")
-  
   useEffect(() => {
     // Create debounced save function
-    saveToSupabaseRef.current = debounce(async (session: ChatSession, msgs: UIMessage[]) => {
+    saveToSupabaseRef.current = debounce((session: ChatSession, msgs: UIMessage[]) => {
       if (!session || msgs.length === 0) return
-      
-      setIsSavingToCloud(true)
-      setCloudError(null)
-      
-      try {
-        // Clear existing messages and save all current ones
-        // This is simpler than trying to diff - Supabase is fast
-        await chatService.clearMessages(session.id)
-        
-        const dbMessages = msgs.map((msg) => chatService.convertToDbMessage(msg))
-        await chatService.saveMessages(session.id, dbMessages)
-        
-        setLastSavedToCloud(new Date())
-        console.log("[chat] Saved", msgs.length, "messages to Supabase")
-      } catch (error) {
-        console.error("[chat] Failed to save to Supabase:", error)
-        setCloudError("Failed to save to cloud")
-      } finally {
-        setIsSavingToCloud(false)
-      }
+
+      const requestId = ++latestCloudSaveRequestRef.current
+
+      cloudSaveQueueRef.current = cloudSaveQueueRef.current
+        .catch(() => {
+          // Keep save queue alive after failures.
+        })
+        .then(async () => {
+          if (requestId !== latestCloudSaveRequestRef.current) {
+            return
+          }
+
+          setIsSavingToCloud(true)
+          setCloudError(null)
+
+          try {
+            // Clear existing messages and save all current ones as a single ordered operation.
+            await chatService.clearMessages(session.id)
+
+            if (requestId !== latestCloudSaveRequestRef.current) {
+              return
+            }
+
+            const dbMessages = msgs.map((msg) => chatService.convertToDbMessage(msg))
+            await chatService.saveMessages(session.id, dbMessages)
+
+            if (requestId === latestCloudSaveRequestRef.current) {
+              setLastSavedToCloud(new Date())
+              console.log("[chat] Saved", msgs.length, "messages to Supabase")
+            }
+          } catch (error) {
+            console.error("[chat] Failed to save to Supabase:", error)
+            if (requestId === latestCloudSaveRequestRef.current) {
+              setCloudError("Failed to save to cloud")
+            }
+          } finally {
+            if (requestId === latestCloudSaveRequestRef.current) {
+              setIsSavingToCloud(false)
+            }
+          }
+        })
     }, SAVE_DEBOUNCE_MS)
     
     return () => {
       saveToSupabaseRef.current?.cancel()
+      latestCloudSaveRequestRef.current += 1
     }
   }, [])
 
@@ -544,7 +595,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     if (isLoadingHistory) return
     if (messages.length === 0) return
 
-    const messagesJson = JSON.stringify(messages.map(m => ({ id: m.id, role: m.role })))
+    const messagesJson = getMessagesFingerprint(messages)
     if (messagesJson === lastSavedMessagesRef.current) return
     lastSavedMessagesRef.current = messagesJson
 
@@ -592,12 +643,17 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     }, 1000)
 
     return () => clearTimeout(timeoutId)
-  }, [messages, isLoadingHistory, user, chatSession])
+  }, [messages, isLoadingHistory, user, chatSession, getMessagesFingerprint])
 
   // ============================================
   // CLEAR CHAT
   // ============================================
   const handleClearChat = async () => {
+    invalidatePendingCloudSaves()
+    await cloudSaveQueueRef.current.catch(() => {
+      // Clearing chat should continue even if a previous save failed.
+    })
+
     setMessages([])
     lastSavedMessagesRef.current = ""
 
@@ -625,11 +681,12 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
   const handleSelectSession = async (session: ChatSession) => {
     setIsLoadingHistory(true)
     try {
+      invalidatePendingCloudSaves()
       setChatSession(session)
       const dbMessages = await chatService.getMessages(session.id)
       const aiMessages = chatService.convertFromDbMessages(dbMessages)
       setMessages(aiMessages)
-      lastSavedMessagesRef.current = JSON.stringify(aiMessages.map(m => ({ id: m.id, role: m.role })))
+      lastSavedMessagesRef.current = getMessagesFingerprint(aiMessages)
       setLastSavedToCloud(new Date())
       console.log("[chat] Loaded session:", session.id, "with", dbMessages.length, "messages")
     } catch (error) {
@@ -646,6 +703,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
   const handleNewChat = async () => {
     setMessages([])
     lastSavedMessagesRef.current = ""
+    invalidatePendingCloudSaves()
     setChatSession(null)
     setLastSavedToCloud(null)
     setCloudError(null)

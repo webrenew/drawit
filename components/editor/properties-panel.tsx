@@ -49,6 +49,7 @@ export function PropertiesPanel({
 
   const isArrowOrLine =
     selectedElements.length > 0 && (selectedElements[0].type === "arrow" || selectedElements[0].type === "line")
+  const hasArrowSelected = selectedElements.length > 0 && selectedElements[0].type === "arrow"
 
   const allTextElements = selectedElements.length > 0 && selectedElements.every((el) => el.type === "text")
 
@@ -230,14 +231,15 @@ export function PropertiesPanel({
       </div>
 
       {/* Arrow Head Style - only for arrows and connectors */}
-      {(isArrowOrLine || hasConnectionSelected) && (
+      {(hasArrowSelected || hasConnectionSelected) && (
         <div className="space-y-3">
           <label className="text-xs font-medium text-muted-foreground">Arrow head</label>
           <div className="flex gap-2 bg-secondary/30 p-1 rounded-md">
             {[
               { value: "none", label: "—" },
               { value: "arrow", label: "→" },
-              { value: "triangle", label: "▶" },
+              { value: "dot", label: "●" },
+              { value: "bar", label: "|" },
             ].map((opt) => (
               <button
                 key={opt.value}
