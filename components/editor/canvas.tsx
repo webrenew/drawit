@@ -34,6 +34,12 @@ import { BrandIcon } from "@/components/brand-icon"
 import { toast } from "sonner"
 // Helper for ID generation
 const generateId = () => Math.random().toString(36).substr(2, 9)
+const CANVAS_DEBUG = process.env.NEXT_PUBLIC_CANVAS_DEBUG === "true"
+
+const canvasDebugLog = (...args: unknown[]) => {
+  if (!CANVAS_DEBUG) return
+  console.log(...args)
+}
 
 // Helper to convert textAlign to SVG textAnchor
 const getTextAnchor = (textAlign: string | undefined): "start" | "middle" | "end" => {
@@ -50,6 +56,28 @@ const getTextAnchor = (textAlign: string | undefined): "start" | "middle" | "end
 
 type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw"
 type LineHandle = "start" | "end"
+type CanvasHistoryEntry = {
+  elements: CanvasElement[]
+  connections: SmartConnection[]
+}
+
+const arraysShareReferences = <T,>(a: readonly T[], b: readonly T[]) => {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+const createHistoryEntry = (elements: CanvasElement[], connections: SmartConnection[]): CanvasHistoryEntry => ({
+  // Keep element/connection object references (structural sharing), only copy array shells.
+  elements: [...elements],
+  connections: [...connections],
+})
+
+const historyEntriesEqual = (a: CanvasHistoryEntry, b: CanvasHistoryEntry) =>
+  arraysShareReferences(a.elements, b.elements) && arraysShareReferences(a.connections, b.connections)
 
 // Helper to sanitize elements for Liveblocks storage (removes undefined)
 const _sanitizeElement = (element: CanvasElement): CanvasElement => {
@@ -207,18 +235,13 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       zoom: 1,
     })
 
-    console.log("[v0] Reset viewport to center on elements:", { minX, minY, maxX, maxY, centerX, centerY })
+    canvasDebugLog("[v0] Reset viewport to center on elements:", { minX, minY, maxX, maxY, centerX, centerY })
   }, [elements])
 
   const appStateRef = useRef(appState)
   useEffect(() => {
     appStateRef.current = appState
   }, [appState])
-
-  type CanvasHistoryEntry = {
-    elements: CanvasElement[]
-    connections: SmartConnection[]
-  }
 
   const historyRef = useRef<CanvasHistoryEntry[]>([])
   const historyIndexRef = useRef(-1)
@@ -227,9 +250,10 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   const historyInitializedRef = useRef(false)
 
   const saveToHistory = useCallback((currentElements: CanvasElement[], currentConnections: SmartConnection[]) => {
-    if (isUndoRedoRef.current) {
-      isUndoRedoRef.current = false
-      console.log("[v0] Skipping history save (undo/redo in progress)")
+    const nextEntry = createHistoryEntry(currentElements, currentConnections)
+    const currentEntry = historyRef.current[historyIndexRef.current]
+
+    if (currentEntry && historyEntriesEqual(currentEntry, nextEntry)) {
       return
     }
 
@@ -238,12 +262,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1)
     }
 
-    // Deep clone to avoid reference issues with mutable objects
-    const clonedState: CanvasHistoryEntry = {
-      elements: JSON.parse(JSON.stringify(currentElements)),
-      connections: JSON.parse(JSON.stringify(currentConnections)),
-    }
-    historyRef.current.push(clonedState)
+    historyRef.current.push(nextEntry)
 
     // Limit history size
     if (historyRef.current.length > MAX_HISTORY) {
@@ -252,16 +271,16 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       historyIndexRef.current++
     }
 
-    console.log("[v0] History saved - index:", historyIndexRef.current, "total:", historyRef.current.length)
+    canvasDebugLog("[v0] History saved - index:", historyIndexRef.current, "total:", historyRef.current.length)
   }, [])
 
   const undo = useCallback(() => {
-    console.log("[v0] Undo called - index:", historyIndexRef.current, "history length:", historyRef.current.length)
+    canvasDebugLog("[v0] Undo called - index:", historyIndexRef.current, "history length:", historyRef.current.length)
     if (historyIndexRef.current > 0) {
       historyIndexRef.current--
       isUndoRedoRef.current = true
       const previousState = historyRef.current[historyIndexRef.current]
-      console.log(
+      canvasDebugLog(
         "[v0] Undoing to state with",
         previousState.elements.length,
         "elements and",
@@ -269,20 +288,20 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         "connections",
       )
 
-      setCanvasState(previousState.elements, previousState.connections)
+      setCanvasState([...previousState.elements], [...previousState.connections])
       setAppState((prev) => ({ ...prev, selection: [] }))
     } else {
-      console.log("[v0] Cannot undo - at beginning of history")
+      canvasDebugLog("[v0] Cannot undo - at beginning of history")
     }
   }, [setCanvasState, setAppState])
 
   const redo = useCallback(() => {
-    console.log("[v0] Redo called - index:", historyIndexRef.current, "history length:", historyRef.current.length)
+    canvasDebugLog("[v0] Redo called - index:", historyIndexRef.current, "history length:", historyRef.current.length)
     if (historyIndexRef.current < historyRef.current.length - 1) {
       historyIndexRef.current++
       isUndoRedoRef.current = true
       const nextState = historyRef.current[historyIndexRef.current]
-      console.log(
+      canvasDebugLog(
         "[v0] Redoing to state with",
         nextState.elements.length,
         "elements and",
@@ -290,35 +309,22 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         "connections",
       )
 
-      setCanvasState(nextState.elements, nextState.connections)
+      setCanvasState([...nextState.elements], [...nextState.connections])
       setAppState((prev) => ({ ...prev, selection: [] }))
     } else {
-      console.log("[v0] Cannot redo - at end of history")
+      canvasDebugLog("[v0] Cannot redo - at end of history")
     }
   }, [setCanvasState, setAppState])
 
-  const prevCanvasSnapshotRef = useRef<string>("")
-
   useEffect(() => {
-    if (!elements || !Array.isArray(elements)) return
-
-    const currentSnapshot = JSON.stringify({
-      elements,
-      connections,
-    })
+    if (!Array.isArray(elements) || !Array.isArray(connections)) return
 
     // Initialize history with first state (only once)
     if (!historyInitializedRef.current) {
-      historyRef.current = [
-        {
-          elements: JSON.parse(JSON.stringify(elements)),
-          connections: JSON.parse(JSON.stringify(connections)),
-        },
-      ]
+      historyRef.current = [createHistoryEntry(elements, connections)]
       historyIndexRef.current = 0
-      prevCanvasSnapshotRef.current = currentSnapshot
       historyInitializedRef.current = true
-      console.log(
+      canvasDebugLog(
         "[v0] History initialized with",
         elements.length,
         "elements and",
@@ -330,35 +336,16 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
     // Skip if this is an undo/redo operation
     if (isUndoRedoRef.current) {
-      prevCanvasSnapshotRef.current = currentSnapshot
       isUndoRedoRef.current = false
       return
     }
 
-    // Save to history if elements or connections changed
-    if (currentSnapshot !== prevCanvasSnapshotRef.current) {
-      const previousSnapshot = prevCanvasSnapshotRef.current
-        ? (JSON.parse(prevCanvasSnapshotRef.current) as CanvasHistoryEntry)
-        : { elements: [], connections: [] }
-
-      console.log(
-        "[v0] Elements changed, saving to history. Old count:",
-        previousSnapshot.elements.length,
-        "New element count:",
-        elements.length,
-        "Old connection count:",
-        previousSnapshot.connections.length,
-        "New connection count:",
-        connections.length,
-      )
-      saveToHistory(elements, connections)
-      prevCanvasSnapshotRef.current = currentSnapshot
-    }
+    saveToHistory(elements, connections)
   }, [elements, connections, saveToHistory])
 
   const handleAction = useCallback(
     (action: string) => {
-      console.log("[v0] handleAction called with:", action, "selection:", appStateRef.current.selection)
+      canvasDebugLog("[v0] handleAction called with:", action, "selection:", appStateRef.current.selection)
       const currentSelection = appStateRef.current.selection
 
       if (action === "delete") {
@@ -381,10 +368,10 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         if (deletableElementIds.size === 0) return
         didDeleteSomething = true
 
-        console.log("[v0] Deleting elements:", currentSelection)
+        canvasDebugLog("[v0] Deleting elements:", currentSelection)
         updateElements((prev) => {
-          console.log("[v0] Before filter - element count:", prev.length)
-          console.log(
+          canvasDebugLog("[v0] Before filter - element count:", prev.length)
+          canvasDebugLog(
             "[v0] First few elements:",
             prev.slice(0, 3).map((e) => ({ id: e.id, type: e.type, locked: e.isLocked })),
           )
@@ -394,15 +381,15 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
               const shouldDelete = inSelection && !el.isLocked
 
             if (inSelection) {
-              console.log("[v0] Element", el.id, "in selection, locked:", el.isLocked, "will delete:", shouldDelete)
+              canvasDebugLog("[v0] Element", el.id, "in selection, locked:", el.isLocked, "will delete:", shouldDelete)
             }
 
             return !shouldDelete
           })
 
-          console.log("[v0] After filter - element count:", filtered.length)
-          console.log("[v0] Elements before delete:", prev.length, "after:", filtered.length)
-          console.log(
+          canvasDebugLog("[v0] After filter - element count:", filtered.length)
+          canvasDebugLog("[v0] Elements before delete:", prev.length, "after:", filtered.length)
+          canvasDebugLog(
             "[v0] Filtered element IDs:",
             filtered.map((el) => el.id),
           )
@@ -500,11 +487,11 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
     const handleKeyDown = (e: KeyboardEvent) => {
       const currentElements = elementsRef.current
       if (!currentElements || !Array.isArray(currentElements)) {
-        console.log("[v0] Elements not ready yet, skipping keyboard event")
+        canvasDebugLog("[v0] Elements not ready yet, skipping keyboard event")
         return
       }
 
-      console.log("[v0] KeyDown event:", {
+      canvasDebugLog("[v0] KeyDown event:", {
         key: e.key,
         editingId: editingIdRef.current,
         activeElement: document.activeElement?.tagName,
@@ -521,7 +508,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         document.activeElement?.getAttribute("contenteditable") === "true"
 
       if (isInputFocused) {
-        console.log("[v0] Input is focused, ignoring keyboard event")
+        canvasDebugLog("[v0] Input is focused, ignoring keyboard event")
         return
       }
 
@@ -541,13 +528,13 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         e.preventDefault()
         const allElementIds = currentElements.map((el) => el.id)
         setAppState((prev) => ({ ...prev, selection: allElementIds }))
-        console.log("[v0] Selected all elements:", allElementIds)
+        canvasDebugLog("[v0] Selected all elements:", allElementIds)
         return
       }
 
       if (e.key === "Backspace" || e.key === "Delete") {
         const selection = appStateRef.current.selection
-        console.log(
+        canvasDebugLog(
           "[v0] Delete key pressed, selection length:",
           selection.length,
           "selectedConnectionId:",
@@ -555,7 +542,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         )
         if (selection.length > 0 || selectedConnectionIdRef.current) {
           e.preventDefault()
-          console.log("[v0] Calling handleAction('delete')")
+          canvasDebugLog("[v0] Calling handleAction('delete')")
           actionHandlersRef.current.handleAction("delete")
         }
       }
@@ -856,11 +843,11 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
     const { x, y } = getMouseCoordinates(e)
 
-    console.log("[v0] Mouse click at canvas coords:", { x, y })
-    console.log("[v0] Current viewport:", viewport)
-    console.log("[v0] Current tool:", appState.tool)
-    console.log("[v0] Elements count:", elements.length)
-    console.log(
+    canvasDebugLog("[v0] Mouse click at canvas coords:", { x, y })
+    canvasDebugLog("[v0] Current viewport:", viewport)
+    canvasDebugLog("[v0] Current tool:", appState.tool)
+    canvasDebugLog("[v0] Elements count:", elements.length)
+    canvasDebugLog(
       "[v0] First 3 element positions:",
       elements.slice(0, 3).map((el) => ({
         id: el.id.slice(0, 8),
@@ -883,7 +870,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         const isInBounds = x >= minX - padding && x <= maxX + padding && y >= minY - padding && y <= maxY + padding
         return isInBounds
       })
-      console.log(
+      canvasDebugLog(
         "[v0] Elements at click position:",
         matchingElements.length,
         matchingElements.map((el) => ({
@@ -1402,7 +1389,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   const handleAppStateChange = (updates: Partial<typeof appState>) => {
     // Update selected elements if any
     if (appState.selection.length > 0) {
-      console.log("[v0] Updating selected elements:", appState.selection)
+      canvasDebugLog("[v0] Updating selected elements:", appState.selection)
       const updatedProps: Partial<CanvasElement> = {}
       if (updates.currentItemStrokeColor !== undefined) updatedProps.strokeColor = updates.currentItemStrokeColor
       if (updates.currentItemBackgroundColor !== undefined)
@@ -1431,11 +1418,11 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         updatedProps.radialGradient = updates.currentItemRadialGradient
 
       if (Object.keys(updatedProps).length > 0) {
-        console.log("[v0] Applying updates to elements:", updatedProps)
+        canvasDebugLog("[v0] Applying updates to elements:", updatedProps)
         updateElements((els) => els.map((el) => (appState.selection.includes(el.id) ? { ...el, ...updatedProps } : el)))
       }
     } else if (selectedConnectionId) {
-      console.log("[v0] Updating selected connection:", selectedConnectionId)
+      canvasDebugLog("[v0] Updating selected connection:", selectedConnectionId)
       const updatedProps: Partial<SmartConnection> = {}
       if (updates.currentItemStrokeColor !== undefined) updatedProps.strokeColor = updates.currentItemStrokeColor
       if (updates.currentItemStrokeWidth !== undefined) updatedProps.strokeWidth = updates.currentItemStrokeWidth
@@ -1444,13 +1431,13 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
       if (updates.currentItemArrowHeadEnd !== undefined) updatedProps.arrowHeadEnd = updates.currentItemArrowHeadEnd
 
       if (Object.keys(updatedProps).length > 0) {
-        console.log("[v0] Applying updates to connection:", updatedProps)
+        canvasDebugLog("[v0] Applying updates to connection:", updatedProps)
         updateConnections((conns) =>
           conns.map((conn) => (conn.id === selectedConnectionId ? { ...conn, ...updatedProps } : conn)),
         )
       }
     } else {
-      console.log("[v0] No selection - only updating appState for future elements")
+      canvasDebugLog("[v0] No selection - only updating appState for future elements")
     }
 
     setAppState((prev) => ({ ...prev, ...updates }))

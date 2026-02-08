@@ -20,7 +20,6 @@ import type { UIMessage } from "@ai-sdk/react"
 import { useAuth } from "@/components/auth-provider"
 import { chatService, type ChatSession } from "@/lib/services/chat-service"
 import { imageService } from "@/lib/services/image-service"
-import { debounce } from "@/lib/utils/debounce"
 import { useAIDiagram } from "@/hooks/use-ai-diagram"
 
 // Types and constants
@@ -35,6 +34,11 @@ import { ChatMessages } from "@/components/ai-chat/chat-messages"
 import { ChatInput, type UploadedImage } from "@/components/ai-chat/chat-input"
 import { ModelSelector } from "@/components/ai-chat/model-selector"
 import { ChatHistorySheet } from "@/components/chat-history-sheet"
+import {
+  useDebouncedCloudSave,
+  useLoadChatHistory,
+  usePersistMessagesOnChange,
+} from "@/components/ai-chat/hooks/use-chat-sync"
 
 // Tool handlers
 import {
@@ -429,7 +433,9 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     },
   })
 
-  const saveToSupabaseRef = useRef<ReturnType<typeof debounce> | null>(null)
+  const saveToSupabaseRef = useRef<
+    (((session: ChatSession, msgs: UIMessage[]) => void) & { cancel: () => void; flush: () => void }) | null
+  >(null)
   const lastSavedMessagesRef = useRef<string>("")
   const cloudSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const latestCloudSaveRequestRef = useRef(0)
@@ -449,201 +455,43 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     )
   }, [])
 
-  // ============================================
-  // LOAD CHAT HISTORY
-  // ============================================
-  useEffect(() => {
-    const loadHistory = async () => {
-      invalidatePendingCloudSaves()
-      setIsLoadingHistory(true)
+  useLoadChatHistory({
+    user,
+    currentDiagramId,
+    selectedModel,
+    currentDiagramTitle: currentDiagram?.title ?? null,
+    setChatSession,
+    setIsLoadingHistory,
+    setMessages,
+    setLastSavedToCloud,
+    setCloudError,
+    updateDiagramTitle,
+    invalidatePendingCloudSaves,
+    getMessagesFingerprint,
+    lastSavedMessagesRef,
+    localStorageKey: CHAT_HISTORY_LOCAL_KEY,
+  })
 
-      // If user is logged in, try to load from Supabase
-      if (user) {
-        try {
-          // Get or create session for current diagram
-          const session = await chatService.getOrCreateSession(currentDiagramId, selectedModel)
-          setChatSession(session)
+  useDebouncedCloudSave({
+    saveToSupabaseRef,
+    cloudSaveQueueRef,
+    latestCloudSaveRequestRef,
+    setIsSavingToCloud,
+    setCloudError,
+    setLastSavedToCloud,
+    saveDebounceMs: SAVE_DEBOUNCE_MS,
+  })
 
-          // Load messages from Supabase
-          const dbMessages = await chatService.getMessages(session.id)
-          if (dbMessages.length > 0) {
-            const aiMessages = chatService.convertFromDbMessages(dbMessages)
-            setMessages(aiMessages)
-            lastSavedMessagesRef.current = getMessagesFingerprint(aiMessages)
-            console.log("[chat] Loaded", dbMessages.length, "messages from Supabase")
-            setLastSavedToCloud(new Date())
-          } else {
-            setMessages([])
-            lastSavedMessagesRef.current = ""
-          }
-
-          // Auto-name session and diagram if they're still default and we have messages
-          if (dbMessages.length > 0) {
-            const aiMessages = chatService.convertFromDbMessages(dbMessages)
-            const extractedTitle = extractTitleFromMessages(aiMessages)
-
-            if (extractedTitle) {
-              // Update chat session title if it's still default
-              if (session.title === "New Chat") {
-                await chatService.updateSession(session.id, { title: extractedTitle })
-                console.log("[chat] Auto-named session:", extractedTitle)
-              }
-
-              // Update diagram title if it's still default
-              if (currentDiagram?.title === "Untitled Diagram") {
-                await updateDiagramTitle(extractedTitle)
-                console.log("[chat] Auto-named diagram:", extractedTitle)
-              }
-            }
-          }
-
-          setIsLoadingHistory(false)
-          return
-        } catch (error) {
-          console.warn("[chat] Failed to load from Supabase, falling back to localStorage:", error)
-          setCloudError("Failed to sync with cloud")
-        }
-      }
-      
-      // Fallback to localStorage
-      try {
-        const localHistory = localStorage.getItem(CHAT_HISTORY_LOCAL_KEY)
-        if (localHistory) {
-          const localData = JSON.parse(localHistory)
-          if (localData.messages && Array.isArray(localData.messages) && localData.messages.length > 0) {
-            console.log("[chat] Loaded history from localStorage:", localData.messages.length, "messages")
-            setMessages(localData.messages)
-            lastSavedMessagesRef.current = getMessagesFingerprint(localData.messages)
-          } else {
-            setMessages([])
-            lastSavedMessagesRef.current = ""
-          }
-        } else {
-          setMessages([])
-          lastSavedMessagesRef.current = ""
-        }
-      } catch (error) {
-        console.warn("[chat] Failed to load chat history:", error)
-      } finally {
-        setIsLoadingHistory(false)
-      }
-    }
-
-    loadHistory()
-  }, [user, currentDiagramId, selectedModel, setMessages, invalidatePendingCloudSaves, getMessagesFingerprint])
-
-  // ============================================
-  // SAVE MESSAGES TO SUPABASE (debounced)
-  // ============================================
-  useEffect(() => {
-    // Create debounced save function
-    saveToSupabaseRef.current = debounce((session: ChatSession, msgs: UIMessage[]) => {
-      if (!session || msgs.length === 0) return
-
-      const requestId = ++latestCloudSaveRequestRef.current
-
-      cloudSaveQueueRef.current = cloudSaveQueueRef.current
-        .catch(() => {
-          // Keep save queue alive after failures.
-        })
-        .then(async () => {
-          if (requestId !== latestCloudSaveRequestRef.current) {
-            return
-          }
-
-          setIsSavingToCloud(true)
-          setCloudError(null)
-
-          try {
-            // Clear existing messages and save all current ones as a single ordered operation.
-            await chatService.clearMessages(session.id)
-
-            if (requestId !== latestCloudSaveRequestRef.current) {
-              return
-            }
-
-            const dbMessages = msgs.map((msg) => chatService.convertToDbMessage(msg))
-            await chatService.saveMessages(session.id, dbMessages)
-
-            if (requestId === latestCloudSaveRequestRef.current) {
-              setLastSavedToCloud(new Date())
-              console.log("[chat] Saved", msgs.length, "messages to Supabase")
-            }
-          } catch (error) {
-            console.error("[chat] Failed to save to Supabase:", error)
-            if (requestId === latestCloudSaveRequestRef.current) {
-              setCloudError("Failed to save to cloud")
-            }
-          } finally {
-            if (requestId === latestCloudSaveRequestRef.current) {
-              setIsSavingToCloud(false)
-            }
-          }
-        })
-    }, SAVE_DEBOUNCE_MS)
-    
-    return () => {
-      saveToSupabaseRef.current?.cancel()
-      latestCloudSaveRequestRef.current += 1
-    }
-  }, [])
-
-  // ============================================
-  // SAVE MESSAGES ON CHANGE
-  // ============================================
-  useEffect(() => {
-    if (isLoadingHistory) return
-    if (messages.length === 0) return
-
-    const messagesJson = getMessagesFingerprint(messages)
-    if (messagesJson === lastSavedMessagesRef.current) return
-    lastSavedMessagesRef.current = messagesJson
-
-    // Save to Supabase if logged in
-    if (user && chatSession) {
-      saveToSupabaseRef.current?.(chatSession, messages)
-    }
-
-    // Always save to localStorage as backup
-    const timeoutId = setTimeout(() => {
-      try {
-        const serializableMessages = messages.map((msg) => {
-          const msgWithContent = msg as UIMessage & { content?: string; createdAt?: Date | string }
-          const serializableParts = msg.parts?.filter((part) => {
-            return part.type === "text" || part.type === "file" || part.type === "reasoning"
-          }).map((part) => {
-            if (part.type === "file") {
-              const filePart = part as { type: "file"; url?: string; filename?: string; mimeType?: string }
-              return {
-                type: "file",
-                url: filePart.url,
-                filename: filePart.filename,
-                mimeType: filePart.mimeType,
-              }
-            }
-            return part
-          })
-
-          return {
-            id: msg.id,
-            role: msg.role,
-            content: msgWithContent.content || "",
-            createdAt: msgWithContent.createdAt instanceof Date ? msgWithContent.createdAt.toISOString() : msgWithContent.createdAt,
-            ...(serializableParts && serializableParts.length > 0 && { parts: serializableParts }),
-          }
-        })
-
-        localStorage.setItem(CHAT_HISTORY_LOCAL_KEY, JSON.stringify({
-          messages: serializableMessages,
-          updatedAt: new Date().toISOString(),
-        }))
-      } catch (error) {
-        console.warn("[chat] Failed to save to localStorage:", error)
-      }
-    }, 1000)
-
-    return () => clearTimeout(timeoutId)
-  }, [messages, isLoadingHistory, user, chatSession, getMessagesFingerprint])
+  usePersistMessagesOnChange({
+    messages,
+    isLoadingHistory,
+    user,
+    chatSession,
+    saveToSupabaseRef,
+    lastSavedMessagesRef,
+    getMessagesFingerprint,
+    localStorageKey: CHAT_HISTORY_LOCAL_KEY,
+  })
 
   // ============================================
   // CLEAR CHAT
