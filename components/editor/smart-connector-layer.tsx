@@ -390,11 +390,19 @@ export const SmartConnectorLayer = forwardRef<SmartConnectorLayerHandle, SmartCo
         }))
     }, [elements])
 
+    const elementById = useMemo(() => {
+      const map = new Map<string, CanvasElement>()
+      for (const el of elements) {
+        map.set(el.id, el)
+      }
+      return map
+    }, [elements])
+
     // Convert smart connections to React Flow edges
     const edges: Edge[] = useMemo(() => {
       return connections.map((conn) => {
-        const sourceEl = elements.find((el) => el.id === conn.sourceId)
-        const targetEl = elements.find((el) => el.id === conn.targetId)
+        const sourceEl = elementById.get(conn.sourceId)
+        const targetEl = elementById.get(conn.targetId)
 
         // Auto-determine handle positions if not specified
         let sourceHandle = conn.sourceHandle
@@ -440,7 +448,7 @@ export const SmartConnectorLayer = forwardRef<SmartConnectorLayerHandle, SmartCo
           },
         }
       })
-    }, [connections, elements, selectedConnectionId, isDarkMode])
+    }, [connections, elementById, selectedConnectionId, isDarkMode])
 
     useImperativeHandle(ref, () => ({
       addConnection: (connection: SmartConnection) => {

@@ -124,6 +124,15 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   const [connectorSource, setConnectorSource] = useState<{ elementId: string; handle: HandlePosition } | null>(null)
   const [connectorPreview, setConnectorPreview] = useState<{ x: number; y: number } | null>(null)
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null)
+  const editingIdRef = useRef<string | null>(editingId)
+  const viewportRef = useRef<Viewport>(viewport)
+  const elementsRef = useRef<CanvasElement[]>(elements)
+  const selectedConnectionIdRef = useRef<string | null>(selectedConnectionId)
+
+  editingIdRef.current = editingId
+  viewportRef.current = viewport
+  elementsRef.current = elements
+  selectedConnectionIdRef.current = selectedConnectionId
 
   const centerViewportOnElements = useCallback(() => {
     if (elements.length === 0) return
@@ -484,70 +493,26 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
     }
   }, [editingId])
 
-  useEffect(() => {
-    const handleGlobalPaste = async (e: ClipboardEvent) => {
-      // If we are editing text, let the default paste behavior happen
-      if (editingId || document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
-        return
-      }
-
-      const items = e.clipboardData?.items
-      if (!items) return
-
-      for (const item of items) {
-        if (item.type.indexOf("image") !== -1) {
-          e.preventDefault()
-          const file = item.getAsFile()
-          if (file) {
-            try {
-              const imageUrl = await compressImage(file)
-              const id = generateId()
-
-              // Calculate center of the viewport
-              const rect = containerRef.current?.getBoundingClientRect()
-              const clientX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2
-              const clientY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2
-
-              // Convert to canvas coordinates
-              const x = (clientX - (rect?.left || 0)) / viewport.zoom - viewport.x
-              const y = (clientY - (rect?.top || 0)) / viewport.zoom - viewport.y
-
-              const newElement = createElement(id, x - 100, y - 100, "image")
-              newElement.width = 200
-              newElement.height = 200
-              newElement.imageUrl = imageUrl
-              addElement(newElement)
-              setAppState((prev) => ({ ...prev, tool: "selection", selection: [id] }))
-              toast.success("Image pasted successfully")
-            } catch (error) {
-              console.error("Error processing pasted image:", error)
-              toast.error("Failed to paste image")
-            }
-          }
-        }
-      }
-    }
-
-    document.addEventListener("paste", handleGlobalPaste)
-    return () => document.removeEventListener("paste", handleGlobalPaste)
-  }, [editingId, viewport, addElement, setAppState])
+  const actionHandlersRef = useRef({ handleAction, undo, redo })
+  actionHandlersRef.current = { handleAction, undo, redo }
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!elements || !Array.isArray(elements)) {
+      const currentElements = elementsRef.current
+      if (!currentElements || !Array.isArray(currentElements)) {
         console.log("[v0] Elements not ready yet, skipping keyboard event")
         return
       }
 
       console.log("[v0] KeyDown event:", {
         key: e.key,
-        editingId,
+        editingId: editingIdRef.current,
         activeElement: document.activeElement?.tagName,
-        selection: appState.selection,
+        selection: appStateRef.current.selection,
         target: e.target,
       })
 
-      if (editingId) return
+      if (editingIdRef.current) return
 
       // Check if any input/textarea in the entire document has focus
       const isInputFocused =
@@ -562,42 +527,43 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault()
-        undo()
+        actionHandlersRef.current.undo()
         return
       }
 
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
         e.preventDefault()
-        redo()
+        actionHandlersRef.current.redo()
         return
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault()
-        const allElementIds = elements.map((el) => el.id)
+        const allElementIds = currentElements.map((el) => el.id)
         setAppState((prev) => ({ ...prev, selection: allElementIds }))
         console.log("[v0] Selected all elements:", allElementIds)
         return
       }
 
       if (e.key === "Backspace" || e.key === "Delete") {
+        const selection = appStateRef.current.selection
         console.log(
           "[v0] Delete key pressed, selection length:",
-          appState.selection.length,
+          selection.length,
           "selectedConnectionId:",
-          selectedConnectionId,
+          selectedConnectionIdRef.current,
         )
-        if (appState.selection.length > 0 || selectedConnectionId) {
+        if (selection.length > 0 || selectedConnectionIdRef.current) {
           e.preventDefault()
           console.log("[v0] Calling handleAction('delete')")
-          handleAction("delete")
+          actionHandlersRef.current.handleAction("delete")
         }
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [appState.selection, editingId, handleAction, elements, selectedConnectionId, setAppState, undo, redo]) // Added undo, redo as dependencies
+  }, [setAppState])
 
   // --- Helpers ---
 
@@ -699,6 +665,64 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
 
     return element
   }
+
+  const createElementRef = useRef(createElement)
+  const addElementRef = useRef(addElement)
+  createElementRef.current = createElement
+  addElementRef.current = addElement
+
+  useEffect(() => {
+    const handleGlobalPaste = async (e: ClipboardEvent) => {
+      // If we are editing text, let the default paste behavior happen.
+      if (
+        editingIdRef.current ||
+        document.activeElement?.tagName === "TEXTAREA" ||
+        document.activeElement?.tagName === "INPUT"
+      ) {
+        return
+      }
+
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      for (const item of items) {
+        if (!item.type.includes("image")) continue
+
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (!file) continue
+
+        try {
+          const imageUrl = await compressImage(file)
+          const id = generateId()
+
+          // Calculate center of the viewport.
+          const rect = containerRef.current?.getBoundingClientRect()
+          const clientX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2
+          const clientY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2
+
+          // Convert to canvas coordinates with latest viewport values.
+          const currentViewport = viewportRef.current
+          const x = (clientX - (rect?.left || 0)) / currentViewport.zoom - currentViewport.x
+          const y = (clientY - (rect?.top || 0)) / currentViewport.zoom - currentViewport.y
+
+          const newElement = createElementRef.current(id, x - 100, y - 100, "image")
+          newElement.width = 200
+          newElement.height = 200
+          newElement.imageUrl = imageUrl
+          addElementRef.current(newElement)
+          setAppState((prev) => ({ ...prev, tool: "selection", selection: [id] }))
+          toast.success("Image pasted successfully")
+        } catch (error) {
+          console.error("Error processing pasted image:", error)
+          toast.error("Failed to paste image")
+        }
+      }
+    }
+
+    document.addEventListener("paste", handleGlobalPaste)
+    return () => document.removeEventListener("paste", handleGlobalPaste)
+  }, [setAppState])
 
   const isPointInElement = (x: number, y: number, el: CanvasElement): boolean => {
     const padding = 10
@@ -1569,6 +1593,305 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
     }
   }
 
+  const renderShapeLabel = (
+    el: CanvasElement,
+    dimensions: { x: number; y: number; width: number; height: number },
+    typography: { fontSize: number; lineHeight: number },
+  ) => {
+    if (!el.label) return null
+
+    return (
+      <foreignObject x={dimensions.x} y={dimensions.y} width={dimensions.width} height={dimensions.height}>
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: el.labelColor || getSolidStrokeColor(el.strokeColor),
+            fontSize: el.labelFontSize || typography.fontSize,
+            fontWeight: el.labelFontWeight || "normal",
+            textAlign: "center",
+            overflow: "hidden",
+            wordBreak: "break-word",
+            lineHeight: typography.lineHeight,
+          }}
+        >
+          {el.label}
+        </div>
+      </foreignObject>
+    )
+  }
+
+  const renderCanvasElement = (el: CanvasElement, mode: "live" | "preview", options?: { isSelected?: boolean; isEditing?: boolean }) => {
+    const isPreview = mode === "preview"
+    const strokeDasharray = isPreview ? "4 4" : getStrokeDashArray(el.strokeStyle, el.strokeWidth)
+    const fillValue = isGradientStroke(el.strokeColor) ? `url(#${getGradientId(el.id)})` : el.backgroundColor
+    const strokeColorValue = getSolidStrokeColor(el.strokeColor)
+    const elementOpacity = normalizeOpacity(el.opacity) * (isPreview ? 0.7 : 1)
+    const isEditing = Boolean(options?.isEditing)
+
+    return (
+      <g
+        key={isPreview ? `preview-${el.id}` : el.id}
+        className={isPreview ? "pointer-events-none" : "pointer-events-auto"}
+        shapeRendering={isPreview ? undefined : "geometricPrecision"}
+        opacity={isPreview ? 0.5 : undefined}
+      >
+        {el.type === "rectangle" && (
+          <g>
+            <rect
+              x={el.x}
+              y={el.y}
+              width={el.width}
+              height={el.height}
+              fill={fillValue}
+              stroke={strokeColorValue}
+              strokeWidth={el.strokeWidth}
+              strokeDasharray={strokeDasharray}
+              rx={isPreview ? (isNaN(el.roughness) ? 0 : (el.roughness || 0) * 5) : 4}
+              ry={isPreview ? undefined : 4}
+              opacity={elementOpacity}
+            />
+            {renderShapeLabel(
+              el,
+              {
+                x: el.x + (el.labelPadding ?? 8),
+                y: el.y + (el.labelPadding ?? 8),
+                width: el.width - (el.labelPadding ?? 8) * 2,
+                height: el.height - (el.labelPadding ?? 8) * 2,
+              },
+              { fontSize: 14, lineHeight: 1.2 },
+            )}
+          </g>
+        )}
+
+        {el.type === "ellipse" && (
+          <g>
+            <ellipse
+              cx={el.x + el.width / 2}
+              cy={el.y + el.height / 2}
+              rx={Math.abs(el.width || 0) / 2}
+              ry={Math.abs(el.height || 0) / 2}
+              fill={fillValue}
+              stroke={strokeColorValue}
+              strokeWidth={el.strokeWidth}
+              strokeDasharray={strokeDasharray}
+              opacity={elementOpacity}
+            />
+            {renderShapeLabel(
+              el,
+              {
+                x: el.x + (el.labelPadding ?? 12),
+                y: el.y + (el.labelPadding ?? 12),
+                width: el.width - (el.labelPadding ?? 12) * 2,
+                height: el.height - (el.labelPadding ?? 12) * 2,
+              },
+              { fontSize: 14, lineHeight: 1.2 },
+            )}
+          </g>
+        )}
+
+        {el.type === "diamond" && (
+          <g>
+            <polygon
+              points={`${el.x + el.width / 2},${el.y} ${el.x + el.width},${el.y + el.height / 2} ${el.x + el.width / 2},${el.y + el.height} ${el.x},${el.y + el.height / 2}`}
+              fill={fillValue}
+              stroke={strokeColorValue}
+              strokeWidth={el.strokeWidth}
+              strokeDasharray={strokeDasharray}
+              opacity={elementOpacity}
+              strokeLinejoin={isPreview ? undefined : "round"}
+            />
+            {renderShapeLabel(
+              el,
+              {
+                x: el.x + el.width * 0.25,
+                y: el.y + el.height * 0.25,
+                width: el.width * 0.5,
+                height: el.height * 0.5,
+              },
+              { fontSize: 12, lineHeight: 1.1 },
+            )}
+          </g>
+        )}
+
+        {el.type === "arrow" && el.points && el.points.length > 0 && (
+          <g>
+            {(() => {
+              const startPoint = el.points[0]
+              const endPoint = el.points[el.points.length - 1]
+              const lineAngle = Math.atan2(endPoint[1] - startPoint[1], endPoint[0] - startPoint[0])
+
+              return (
+                <>
+                  <line
+                    x1={el.x + startPoint[0]}
+                    y1={el.y + startPoint[1]}
+                    x2={el.x + endPoint[0]}
+                    y2={el.y + endPoint[1]}
+                    stroke={strokeColorValue}
+                    strokeWidth={el.strokeWidth || 2}
+                    strokeDasharray={strokeDasharray}
+                    opacity={elementOpacity}
+                    strokeLinecap={isPreview ? undefined : "round"}
+                  />
+                  {renderArrowHead(
+                    el.x + endPoint[0],
+                    el.y + endPoint[1],
+                    lineAngle,
+                    el.arrowHeadEnd,
+                    strokeColorValue,
+                    el.strokeWidth,
+                  )}
+                  {renderArrowHead(
+                    el.x + startPoint[0],
+                    el.y + startPoint[1],
+                    lineAngle + Math.PI,
+                    el.arrowHeadStart,
+                    strokeColorValue,
+                    el.strokeWidth,
+                  )}
+                </>
+              )
+            })()}
+          </g>
+        )}
+
+        {el.type === "line" && el.points && el.points.length > 0 && (
+          <line
+            x1={el.x + el.points[0][0]}
+            y1={el.y + el.points[0][1]}
+            x2={el.x + el.points[el.points.length - 1][0]}
+            y2={el.y + el.points[el.points.length - 1][1]}
+            stroke={strokeColorValue || (resolvedTheme === "dark" ? "#ffffff" : "#000000")}
+            strokeWidth={el.strokeWidth || 2}
+            strokeDasharray={strokeDasharray}
+            opacity={elementOpacity}
+            strokeLinecap={isPreview ? undefined : "round"}
+          />
+        )}
+
+        {el.type === "freedraw" && el.points && el.points.length > 0 && (
+          <g transform={`translate(${el.x}, ${el.y})`}>
+            <polyline
+              points={el.points.map((p) => `${p[0]},${p[1]}`).join(" ")}
+              fill="none"
+              stroke={strokeColorValue}
+              strokeWidth={isPreview ? el.strokeWidth : (el.strokeWidth || 2)}
+              strokeDasharray={strokeDasharray}
+              opacity={elementOpacity}
+              strokeLinecap={isPreview ? undefined : "round"}
+              strokeLinejoin={isPreview ? undefined : "round"}
+            />
+          </g>
+        )}
+
+        {el.type === "text" && isPreview && (
+          <text
+            x={el.x}
+            y={el.y}
+            fill={getSolidStrokeColor(el.strokeColor)}
+            fontSize={el.fontSize}
+            fontWeight={el.fontWeight}
+            fontFamily={el.fontFamily}
+            textAnchor={getTextAnchor(el.textAlign)}
+            opacity={elementOpacity}
+          >
+            {el.text}
+          </text>
+        )}
+
+        {el.type === "text" && !isPreview && !isEditing && (
+          <foreignObject x={el.x} y={el.y} width={el.width || 200} height={el.height || 40} style={{ overflow: "visible" }}>
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent:
+                  el.textAlign === "center"
+                    ? "center"
+                    : el.textAlign === "right"
+                      ? "flex-end"
+                      : "flex-start",
+                color: getSolidStrokeColor(el.strokeColor),
+                fontSize: el.fontSize || 20,
+                fontWeight: el.fontWeight || "normal",
+                fontFamily: el.fontFamily || "sans-serif",
+                opacity: elementOpacity,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                padding: "4px 8px",
+                boxSizing: "border-box",
+              }}
+            >
+              {el.text || "Double-click to edit"}
+            </div>
+          </foreignObject>
+        )}
+
+        {el.type === "text" && !isPreview && isEditing && (
+          <foreignObject
+            x={el.x}
+            y={el.y}
+            width={Math.max(el.width || 200, 200)}
+            height={Math.max(el.height || 40, 40)}
+            style={{ overflow: "visible" }}
+          >
+            <textarea
+              ref={textAreaRef}
+              value={el.text}
+              onChange={(e) => handleTextChange(el.id, e.target.value)}
+              onBlur={handleBlur}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  handleBlur()
+                }
+                e.stopPropagation()
+              }}
+              style={{
+                width: "100%",
+                height: "100%",
+                minWidth: "200px",
+                minHeight: "40px",
+                background: "transparent",
+                border: "1px solid hsl(var(--primary))",
+                borderRadius: "4px",
+                outline: "none",
+                resize: "both",
+                color: getSolidStrokeColor(el.strokeColor),
+                fontSize: el.fontSize || 20,
+                fontWeight: el.fontWeight || "normal",
+                fontFamily: el.fontFamily || "sans-serif",
+                textAlign: el.textAlign || "left",
+                padding: "4px 8px",
+                boxSizing: "border-box",
+              }}
+              autoFocus
+            />
+          </foreignObject>
+        )}
+
+        {el.type === "image" && el.imageUrl && (
+          <image
+            href={el.imageUrl}
+            x={el.x}
+            y={el.y}
+            width={el.width}
+            height={el.height}
+            preserveAspectRatio="xMidYMid meet"
+            opacity={elementOpacity}
+          />
+        )}
+
+        {!isPreview && options?.isSelected && !el.isLocked && renderResizeHandles(el)}
+      </g>
+    )
+  }
+
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData.items
     for (const item of items) {
@@ -1832,315 +2155,12 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
                 )
               }
 
-              {
-                elements.map((el) => {
-                  const isSelected = appState.selection.includes(el.id)
-                  const strokeDasharray = getStrokeDashArray(el.strokeStyle, el.strokeWidth)
-                  const isEditing = editingId === el.id
-
-                  // Gradient calculation for fill
-                  const fillValue = isGradientStroke(el.strokeColor) ? `url(#${getGradientId(el.id)})` : el.backgroundColor
-
-                  // Solid stroke color for non-gradient strokes
-                  const strokeColorValue = getSolidStrokeColor(el.strokeColor)
-
-                  return (
-                    <g key={el.id} className="pointer-events-auto" shapeRendering="geometricPrecision">
-                      {el.type === "rectangle" && (
-                        <g>
-                          <rect
-                            x={el.x}
-                            y={el.y}
-                            width={el.width}
-                            height={el.height}
-                            fill={fillValue}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth}
-                            strokeDasharray={strokeDasharray}
-                            rx={4}
-                            ry={4}
-                            opacity={normalizeOpacity(el.opacity)}
-                          />
-                          {el.label && (
-                            <foreignObject
-                              x={el.x + (el.labelPadding ?? 8)}
-                              y={el.y + (el.labelPadding ?? 8)}
-                              width={el.width - (el.labelPadding ?? 8) * 2}
-                              height={el.height - (el.labelPadding ?? 8) * 2}
-                            >
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: el.labelColor || getSolidStrokeColor(el.strokeColor),
-                                  fontSize: el.labelFontSize || 14,
-                                  fontWeight: el.labelFontWeight || "normal",
-                                  textAlign: "center",
-                                  overflow: "hidden",
-                                  wordBreak: "break-word",
-                                  lineHeight: 1.2,
-                                }}
-                              >
-                                {el.label}
-                              </div>
-                            </foreignObject>
-                          )}
-                        </g>
-                      )}
-
-                      {el.type === "ellipse" && (
-                        <g>
-                          <ellipse
-                            cx={el.x + el.width / 2}
-                            cy={el.y + el.height / 2}
-                            rx={Math.abs(el.width || 0) / 2}
-                            ry={Math.abs(el.height || 0) / 2}
-                            fill={fillValue}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth}
-                            strokeDasharray={strokeDasharray}
-                            opacity={normalizeOpacity(el.opacity)}
-                          />
-                          {el.label && (
-                            <foreignObject
-                              x={el.x + (el.labelPadding ?? 12)}
-                              y={el.y + (el.labelPadding ?? 12)}
-                              width={el.width - (el.labelPadding ?? 12) * 2}
-                              height={el.height - (el.labelPadding ?? 12) * 2}
-                            >
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: el.labelColor || getSolidStrokeColor(el.strokeColor),
-                                  fontSize: el.labelFontSize || 14,
-                                  fontWeight: el.labelFontWeight || "normal",
-                                  textAlign: "center",
-                                  overflow: "hidden",
-                                  wordBreak: "break-word",
-                                  lineHeight: 1.2,
-                                }}
-                              >
-                                {el.label}
-                              </div>
-                            </foreignObject>
-                          )}
-                        </g>
-                      )}
-
-                      {el.type === "diamond" && (
-                        <g>
-                          <polygon
-                            points={`${el.x + el.width / 2},${el.y} ${el.x + el.width},${el.y + el.height / 2} ${el.x + el.width / 2},${el.y + el.height} ${el.x},${el.y + el.height / 2}`}
-                            fill={fillValue}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth}
-                            strokeDasharray={strokeDasharray}
-                            opacity={normalizeOpacity(el.opacity)}
-                            strokeLinejoin="round"
-                          />
-                          {el.label && (
-                            <foreignObject
-                              x={el.x + el.width * 0.25}
-                              y={el.y + el.height * 0.25}
-                              width={el.width * 0.5}
-                              height={el.height * 0.5}
-                            >
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: el.labelColor || getSolidStrokeColor(el.strokeColor),
-                                  fontSize: el.labelFontSize || 12,
-                                  fontWeight: el.labelFontWeight || "normal",
-                                  textAlign: "center",
-                                  overflow: "hidden",
-                                  wordBreak: "break-word",
-                                  lineHeight: 1.1,
-                                }}
-                              >
-                                {el.label}
-                              </div>
-                            </foreignObject>
-                          )}
-                        </g>
-                      )}
-
-                      {el.type === "arrow" && el.points && el.points.length > 0 && (
-                        <g>
-                          {(() => {
-                            const startPoint = el.points[0]
-                            const endPoint = el.points[el.points.length - 1]
-                            const lineAngle = Math.atan2(endPoint[1] - startPoint[1], endPoint[0] - startPoint[0])
-
-                            return (
-                              <>
-                                <line
-                                  x1={el.x + startPoint[0]}
-                                  y1={el.y + startPoint[1]}
-                                  x2={el.x + endPoint[0]}
-                                  y2={el.y + endPoint[1]}
-                                  stroke={strokeColorValue}
-                                  strokeWidth={el.strokeWidth || 2}
-                                  strokeDasharray={strokeDasharray}
-                                  opacity={normalizeOpacity(el.opacity)}
-                                  strokeLinecap="round"
-                                />
-                                {renderArrowHead(
-                                  el.x + endPoint[0],
-                                  el.y + endPoint[1],
-                                  lineAngle,
-                                  el.arrowHeadEnd,
-                                  strokeColorValue,
-                                  el.strokeWidth,
-                                )}
-                                {renderArrowHead(
-                                  el.x + startPoint[0],
-                                  el.y + startPoint[1],
-                                  lineAngle + Math.PI,
-                                  el.arrowHeadStart,
-                                  strokeColorValue,
-                                  el.strokeWidth,
-                                )}
-                              </>
-                            )
-                          })()}
-                        </g>
-                      )}
-
-                      {el.type === "line" && el.points && el.points.length > 0 && (
-                        <line
-                          x1={el.x + el.points[0][0]}
-                          y1={el.y + el.points[0][1]}
-                          x2={el.x + el.points[el.points.length - 1][0]}
-                          y2={el.y + el.points[el.points.length - 1][1]}
-                          stroke={strokeColorValue || (resolvedTheme === "dark" ? "#ffffff" : "#000000")}
-                          strokeWidth={el.strokeWidth || 2}
-                          strokeDasharray={strokeDasharray}
-                          opacity={normalizeOpacity(el.opacity)}
-                          strokeLinecap="round"
-                        />
-                      )}
-
-                      {el.type === "freedraw" && el.points && el.points.length > 0 && (
-                        <g transform={`translate(${el.x}, ${el.y})`}>
-                          <polyline
-                            points={el.points.map((p) => `${p[0]},${p[1]}`).join(" ")}
-                            fill="none"
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth || 2}
-                            strokeDasharray={strokeDasharray}
-                            opacity={normalizeOpacity(el.opacity)}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </g>
-                      )}
-
-                      {el.type === "text" && !isEditing && (
-                        <foreignObject
-                          x={el.x}
-                          y={el.y}
-                          width={el.width || 200}
-                          height={el.height || 40}
-                          style={{ overflow: "visible" }}
-                        >
-                          <div
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent:
-                                el.textAlign === "center"
-                                  ? "center"
-                                  : el.textAlign === "right"
-                                    ? "flex-end"
-                                    : "flex-start",
-                              color: getSolidStrokeColor(el.strokeColor),
-                              fontSize: el.fontSize || 20,
-                              fontWeight: el.fontWeight || "normal",
-                              fontFamily: el.fontFamily || "sans-serif",
-                              opacity: normalizeOpacity(el.opacity),
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              padding: "4px 8px",
-                              boxSizing: "border-box",
-                            }}
-                          >
-                            {el.text || "Double-click to edit"}
-                          </div>
-                        </foreignObject>
-                      )}
-
-                      {el.type === "text" && isEditing && (
-                        <foreignObject
-                          x={el.x}
-                          y={el.y}
-                          width={Math.max(el.width || 200, 200)}
-                          height={Math.max(el.height || 40, 40)}
-                          style={{ overflow: "visible" }}
-                        >
-                          <textarea
-                            ref={textAreaRef}
-                            value={el.text}
-                            onChange={(e) => handleTextChange(el.id, e.target.value)}
-                            onBlur={handleBlur}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") {
-                                handleBlur()
-                              }
-                              e.stopPropagation()
-                            }}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              minWidth: "200px",
-                              minHeight: "40px",
-                              background: "transparent",
-                              border: "1px solid hsl(var(--primary))",
-                              borderRadius: "4px",
-                              outline: "none",
-                              resize: "both",
-                              color: getSolidStrokeColor(el.strokeColor),
-                              fontSize: el.fontSize || 20,
-                              fontWeight: el.fontWeight || "normal",
-                              fontFamily: el.fontFamily || "sans-serif",
-                              textAlign: el.textAlign || "left",
-                              padding: "4px 8px",
-                              boxSizing: "border-box",
-                            }}
-                            autoFocus
-                          />
-                        </foreignObject>
-                      )}
-
-                      {el.type === "image" && el.imageUrl && (
-                        <image
-                          href={el.imageUrl}
-                          x={el.x}
-                          y={el.y}
-                          width={el.width}
-                          height={el.height}
-                          preserveAspectRatio="xMidYMid meet"
-                          opacity={normalizeOpacity(el.opacity)}
-                        />
-                      )}
-
-                      {isSelected && !el.isLocked && renderResizeHandles(el)}
-                    </g>
-                  )
-                })
-              }
+                            {elements.map((el) =>
+                renderCanvasElement(el, "live", {
+                  isSelected: appState.selection.includes(el.id),
+                  isEditing: editingId === el.id,
+                }),
+              )}
 
               {/* Gradient definitions */}
               {
@@ -2162,247 +2182,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
                 })
               }
 
-              {
-                previewElements &&
-                previewElements.elements.map((el) => {
-                  const _strokeDasharray = getStrokeDashArray(el.strokeStyle, el.strokeWidth)
-
-                  // Gradient calculation for fill
-                  const fillValue = isGradientStroke(el.strokeColor) ? `url(#${getGradientId(el.id)})` : el.backgroundColor
-
-                  // Solid stroke color for non-gradient strokes
-                  const strokeColorValue = getSolidStrokeColor(el.strokeColor)
-
-                  return (
-                    <g key={`preview-${el.id}`} className="pointer-events-none" opacity={0.5}>
-                      {el.type === "rectangle" && (
-                        <g>
-                          <rect
-                            x={el.x}
-                            y={el.y}
-                            width={el.width}
-                            height={el.height}
-                            fill={fillValue}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth}
-                            strokeDasharray="4 4"
-                            rx={isNaN(el.roughness) ? 0 : (el.roughness || 0) * 5}
-                            // Preview rectangle:
-                            opacity={normalizeOpacity(el.opacity) * 0.7}
-                          />
-                          {/* Preview label */}
-                          {el.label && (
-                            <foreignObject
-                              x={el.x + (el.labelPadding ?? 8)}
-                              y={el.y + (el.labelPadding ?? 8)}
-                              width={el.width - (el.labelPadding ?? 8) * 2}
-                              height={el.height - (el.labelPadding ?? 8) * 2}
-                            >
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: el.labelColor || getSolidStrokeColor(el.strokeColor),
-                                  fontSize: el.labelFontSize || 14,
-                                  fontWeight: el.labelFontWeight || "normal",
-                                  textAlign: "center",
-                                  overflow: "hidden",
-                                  wordBreak: "break-word",
-                                  lineHeight: 1.2,
-                                }}
-                              >
-                                {el.label}
-                              </div>
-                            </foreignObject>
-                          )}
-                        </g>
-                      )}
-
-                      {el.type === "ellipse" && (
-                        <g>
-                          <ellipse
-                            cx={el.x + el.width / 2}
-                            cy={el.y + el.height / 2}
-                            rx={Math.abs(el.width || 0) / 2}
-                            ry={Math.abs(el.height || 0) / 2}
-                            fill={fillValue}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth}
-                            strokeDasharray="4 4"
-                            opacity={normalizeOpacity(el.opacity) * 0.7}
-                          />
-                          {/* Preview label */}
-                          {el.label && (
-                            <foreignObject
-                              x={el.x + (el.labelPadding ?? 12)}
-                              y={el.y + (el.labelPadding ?? 12)}
-                              width={el.width - (el.labelPadding ?? 12) * 2}
-                              height={el.height - (el.labelPadding ?? 12) * 2}
-                            >
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: el.labelColor || getSolidStrokeColor(el.strokeColor),
-                                  fontSize: el.labelFontSize || 14,
-                                  fontWeight: el.labelFontWeight || "normal",
-                                  textAlign: "center",
-                                  overflow: "hidden",
-                                  wordBreak: "break-word",
-                                  lineHeight: 1.2,
-                                }}
-                              >
-                                {el.label}
-                              </div>
-                            </foreignObject>
-                          )}
-                        </g>
-                      )}
-
-                      {el.type === "diamond" && (
-                        <g>
-                          <polygon
-                            points={`${el.x + el.width / 2},${el.y} ${el.x + el.width},${el.y + el.height / 2} ${el.x + el.width / 2},${el.y + el.height} ${el.x},${el.y + el.height / 2}`}
-                            fill={fillValue}
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth}
-                            strokeDasharray="4 4"
-                            opacity={normalizeOpacity(el.opacity) * 0.7}
-                          />
-                          {/* Preview label */}
-                          {el.label && (
-                            <foreignObject
-                              x={el.x + el.width * 0.25}
-                              y={el.y + el.height * 0.25}
-                              width={el.width * 0.5}
-                              height={el.height * 0.5}
-                            >
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: el.labelColor || getSolidStrokeColor(el.strokeColor),
-                                  fontSize: el.labelFontSize || 12,
-                                  fontWeight: el.labelFontWeight || "normal",
-                                  textAlign: "center",
-                                  overflow: "hidden",
-                                  wordBreak: "break-word",
-                                  lineHeight: 1.1,
-                                }}
-                              >
-                                {el.label}
-                              </div>
-                            </foreignObject>
-                          )}
-                        </g>
-                      )}
-
-                      {el.type === "arrow" && el.points && el.points.length > 0 && (
-                        <g>
-                          {(() => {
-                            const startPoint = el.points[0]
-                            const endPoint = el.points[el.points.length - 1]
-                            const lineAngle = Math.atan2(endPoint[1] - startPoint[1], endPoint[0] - startPoint[0])
-
-                            return (
-                              <>
-                                <line
-                                  x1={el.x + startPoint[0]}
-                                  y1={el.y + startPoint[1]}
-                                  x2={el.x + endPoint[0]}
-                                  y2={el.y + endPoint[1]}
-                                  stroke={strokeColorValue}
-                                  strokeWidth={el.strokeWidth || 2}
-                                  strokeDasharray="4 4"
-                                  opacity={normalizeOpacity(el.opacity) * 0.7}
-                                />
-                                {renderArrowHead(
-                                  el.x + endPoint[0],
-                                  el.y + endPoint[1],
-                                  lineAngle,
-                                  el.arrowHeadEnd,
-                                  strokeColorValue,
-                                  el.strokeWidth,
-                                )}
-                                {renderArrowHead(
-                                  el.x + startPoint[0],
-                                  el.y + startPoint[1],
-                                  lineAngle + Math.PI,
-                                  el.arrowHeadStart,
-                                  strokeColorValue,
-                                  el.strokeWidth,
-                                )}
-                              </>
-                            )
-                          })()}
-                        </g>
-                      )}
-
-                      {el.type === "line" && el.points && el.points.length > 0 && (
-                        <line
-                          x1={el.x + el.points[0][0]}
-                          y1={el.y + el.points[0][1]}
-                          x2={el.x + el.points[el.points.length - 1][0]}
-                          y2={el.y + el.points[el.points.length - 1][1]}
-                          stroke={strokeColorValue || (resolvedTheme === "dark" ? "#ffffff" : "#000000")}
-                          strokeWidth={el.strokeWidth || 2}
-                          strokeDasharray="4 4"
-                          opacity={normalizeOpacity(el.opacity) * 0.7}
-                        />
-                      )}
-
-                      {el.type === "freedraw" && el.points && el.points.length > 0 && (
-                        <g transform={`translate(${el.x}, ${el.y})`}>
-                          <polyline
-                            points={el.points.map((p) => `${p[0]},${p[1]}`).join(" ")}
-                            fill="none"
-                            stroke={strokeColorValue}
-                            strokeWidth={el.strokeWidth}
-                            strokeDasharray="4 4"
-                            opacity={normalizeOpacity(el.opacity) * 0.7}
-                          />
-                        </g>
-                      )}
-
-                      {el.type === "text" && (
-                        <text
-                          x={el.x}
-                          y={el.y}
-                          fill={getSolidStrokeColor(el.strokeColor)}
-                          fontSize={el.fontSize}
-                          fontWeight={el.fontWeight}
-                          fontFamily={el.fontFamily}
-                          textAnchor={getTextAnchor(el.textAlign)}
-                          opacity={normalizeOpacity(el.opacity) * 0.7}
-                        >
-                          {el.text}
-                        </text>
-                      )}
-
-                      {el.type === "image" && el.imageUrl && (
-                        <image
-                          href={el.imageUrl}
-                          x={el.x}
-                          y={el.y}
-                          width={el.width}
-                          height={el.height}
-                          preserveAspectRatio="xMidYMid meet"
-                          opacity={normalizeOpacity(el.opacity) * 0.7}
-                        />
-                      )}
-                    </g>
-                  )
-                })
-              }
+                            {previewElements?.elements.map((el) => renderCanvasElement(el, "preview"))}
             </svg>
           </div>
 
