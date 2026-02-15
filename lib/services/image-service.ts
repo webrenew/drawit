@@ -42,7 +42,11 @@ class ImageService {
         body: formData,
       })
 
-      const payload = (await response.json()) as { url?: string; error?: string }
+      const payload = (await response.json()) as {
+        url?: string
+        storagePath?: string
+        error?: string
+      }
       if (!response.ok || !payload.url) {
         return { success: false, error: payload.error || "Upload failed" }
       }
@@ -50,6 +54,7 @@ class ImageService {
       return {
         success: true,
         url: payload.url,
+        storagePath: payload.storagePath,
       }
     } catch (err) {
       console.error("[ImageService] Unexpected error:", err)

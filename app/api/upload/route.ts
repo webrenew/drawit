@@ -4,6 +4,7 @@ import sanitizeHtml from "sanitize-html"
 
 // Security constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+const STORAGE_BUCKET = "temp-images"
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -171,7 +172,7 @@ export async function POST(request: Request) {
 
     // Upload to Supabase Storage
     const { data, error } = await supabase.storage
-      .from("images")
+      .from(STORAGE_BUCKET)
       .upload(fileName, uploadContent, {
         contentType: file.type,
         upsert: false,
@@ -184,10 +185,33 @@ export async function POST(request: Request) {
 
     // Get public URL
     const { data: { publicUrl } } = supabase.storage
-      .from("images")
+      .from(STORAGE_BUCKET)
       .getPublicUrl(data.path)
 
-    return NextResponse.json({ url: publicUrl })
+    const { error: metadataError } = await supabase.from("temp_images").insert({
+      user_id: user.id,
+      storage_path: data.path,
+      public_url: publicUrl,
+      file_name: file.name,
+      file_size: file.size,
+      mime_type: file.type,
+    })
+
+    if (metadataError) {
+      console.error("[upload] Failed to register temp image metadata:", metadataError)
+
+      const { error: cleanupError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove([data.path])
+
+      if (cleanupError) {
+        console.error("[upload] Failed to remove untracked uploaded file:", cleanupError)
+      }
+
+      return NextResponse.json({ error: "Failed to register uploaded file" }, { status: 500 })
+    }
+
+    return NextResponse.json({ url: publicUrl, storagePath: data.path })
   } catch (error) {
     console.error("[upload] Error:", error)
     return NextResponse.json({ error: "Failed to upload file" }, { status: 500 })
