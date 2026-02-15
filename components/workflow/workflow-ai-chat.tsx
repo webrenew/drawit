@@ -19,6 +19,7 @@ interface WorkflowAIChatProps {
 
 interface CreateWorkflowToolResult {
   success?: boolean
+  message?: string
   nodeIds?: string[]
   error?: string
 }
