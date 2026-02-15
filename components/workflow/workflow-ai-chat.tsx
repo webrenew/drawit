@@ -17,6 +17,13 @@ interface WorkflowAIChatProps {
   canvasRef: React.RefObject<WorkflowCanvasHandle | null>
 }
 
+interface CreateWorkflowToolResult {
+  success?: boolean
+  message?: string
+  nodeIds?: string[]
+  error?: string
+}
+
 export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [localInput, setLocalInput] = useState("")
@@ -34,6 +41,11 @@ export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
         }
 
         try {
+          const canvas = canvasRef.current
+          if (!canvas) {
+            throw new Error("Workflow canvas is not mounted on this page.")
+          }
+
           const edges =
             input.edges && input.edges.length
               ? input.edges
@@ -45,7 +57,7 @@ export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
                   animated: connection.animated ?? true,
                 }))
 
-          canvasRef.current?.addWorkflow({ nodes: input.nodes, edges }, input.autoLayout ?? true)
+          canvas.addWorkflow({ nodes: input.nodes, edges }, input.autoLayout ?? true)
 
           addToolResult({
             tool: "createWorkflow",
@@ -140,7 +152,7 @@ export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
                   }
                   if (part.type === "tool-createWorkflow") {
                     if (part.state === "output-available") {
-                      const result = part.output as any
+                      const result = part.output as CreateWorkflowToolResult
                       return (
                         <div key={i} className="mt-2 p-2 bg-green-500/10 rounded text-xs">
                           {result?.success
