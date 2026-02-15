@@ -17,6 +17,14 @@ interface WorkflowAIChatProps {
   canvasRef: React.RefObject<WorkflowCanvasHandle | null>
 }
 
+interface CreateWorkflowToolResult {
+  success?: boolean
+  nodeIds?: string[]
+  error?: string
+}
+
+const generateEdgeId = () => `edge_${crypto.randomUUID()}`
+
 export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [localInput, setLocalInput] = useState("")
@@ -37,8 +45,8 @@ export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
           const edges =
             input.edges && input.edges.length
               ? input.edges
-              : (input.connections || []).map((connection, index) => ({
-                  id: `edge_${Date.now()}_${index}`,
+              : (input.connections || []).map((connection) => ({
+                  id: generateEdgeId(),
                   source: connection.from,
                   target: connection.to,
                   label: connection.label,
@@ -140,7 +148,7 @@ export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
                   }
                   if (part.type === "tool-createWorkflow") {
                     if (part.state === "output-available") {
-                      const result = part.output as any
+                      const result = part.output as CreateWorkflowToolResult
                       return (
                         <div key={i} className="mt-2 p-2 bg-green-500/10 rounded text-xs">
                           {result?.success

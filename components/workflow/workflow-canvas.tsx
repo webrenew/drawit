@@ -13,6 +13,8 @@ import {
   type Connection,
   type NodeChange,
   type EdgeChange,
+  type ReactFlowInstance,
+  type Node,
   BackgroundVariant,
   Panel,
 } from "@xyflow/react"
@@ -50,6 +52,7 @@ const initialEdges: WorkflowEdge[] = []
 let nodeId = 2
 
 const generateNodeId = () => `node_${nodeId++}`
+const generateEdgeId = () => `edge_${crypto.randomUUID()}`
 
 export interface WorkflowCanvasHandle {
   addWorkflow: (
@@ -74,13 +77,15 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [nodes, setNodes] = useState<WorkflowNodeType[]>(initialNodes)
   const [edges, setEdges] = useState<WorkflowEdge[]>(initialEdges)
-  const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<WorkflowNodeType, WorkflowEdge> | null>(
+    null,
+  )
 
   useImperativeHandle(ref, () => ({
     addWorkflow: (config: WorkflowConfig, autoLayout = true, direction: "vertical" | "horizontal" = "vertical") => {
-      const normalizeConnections = (connections?: WorkflowConnection[]) =>
-        (connections || []).map((connection, index) => ({
-          id: `edge_${Date.now()}_${index}`,
+      const normalizeConnections = (connections?: WorkflowConnection[]): WorkflowEdge[] =>
+        (connections || []).map((connection) => ({
+          id: generateEdgeId(),
           source: connection.from,
           target: connection.to,
           label: connection.label,
@@ -93,43 +98,45 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         const template = NODE_TEMPLATES[node.type]
         // Use provided position or default to 0,0 (will be overwritten by auto-layout)
         const position = node.position || { x: 0, y: 0 }
+        const description = node.description || (typeof template.description === "string" ? template.description : undefined)
+        const icon = typeof template.icon === "string" ? template.icon : undefined
 
         return {
           id: node.id,
-          type: "workflowNode",
+          type: "workflowNode" as const,
           position,
           data: {
             label: node.label,
             type: node.type,
-            description: (node.description as string | undefined) || template.description,
-            icon: template.icon,
+            description,
+            icon,
             config: node.config,
             status: "idle" as const,
           },
-        } as WorkflowNodeType
+        }
       })
 
       // Create React Flow edges
-      const newEdges: WorkflowEdge[] = (config.edges?.length
-        ? config.edges.map((edge, index) => ({
-            id: edge.id || `edge_${Date.now()}_${index}`,
+      const newEdges: WorkflowEdge[] = config.edges?.length
+        ? config.edges.map((edge) => ({
+            id: edge.id || generateEdgeId(),
             source: edge.source,
             target: edge.target,
             label: edge.label,
             animated: edge.animated ?? true,
             style: { stroke: "#6366f1", strokeWidth: 2 },
           }))
-        : normalizeConnections(config.connections)) as WorkflowEdge[]
+        : normalizeConnections(config.connections)
 
       if (autoLayout) {
         const dagreDirection: LayoutDirection = direction === "horizontal" ? "LR" : "TB"
-        newNodes = layoutWithDagre(newNodes as any, newEdges, {
+        newNodes = layoutWithDagre(newNodes, newEdges, {
           direction: dagreDirection,
           nodeWidth: 200,
           nodeHeight: 80,
           rankSep: 100,
           nodeSep: 60,
-        }) as unknown as WorkflowNodeType[]
+        })
       }
 
       setNodes((prev) => [...prev, ...newNodes])
@@ -149,17 +156,17 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     getWorkflowState: () => ({ nodes, edges }),
 
     analyzeWorkflow: () => {
-      return analyzeLayoutQuality(nodes as any, edges)
+      return analyzeLayoutQuality(nodes, edges)
     },
 
     beautifyWorkflow: () => {
-      const beautifiedNodes = beautifyLayout(nodes as any, edges, {
+      const beautifiedNodes = beautifyLayout(nodes, edges, {
         direction: "TB",
         nodeWidth: 200,
         nodeHeight: 80,
         rankSep: 120, // Increased spacing
         nodeSep: 80, // Increased spacing
-      }) as unknown as WorkflowNodeType[]
+      })
       setNodes(beautifiedNodes)
 
       // Fit view after beautifying
@@ -170,7 +177,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
   }))
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds as any) as unknown as WorkflowNodeType[]),
+    (changes: NodeChange<WorkflowNodeType>[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
     [],
   )
 
@@ -251,8 +258,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
   return (
     <ReactFlowProvider>
       <div ref={reactFlowWrapper} className={cn("w-full h-full relative z-0", className)}>
-        <ReactFlow
-          nodes={nodes as any}
+        <ReactFlow<WorkflowNodeType, WorkflowEdge>
+          nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -260,7 +267,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
           onInit={setReactFlowInstance}
           onDrop={onDrop}
           onDragOver={onDragOver}
-          nodeTypes={nodeTypes as any}
+          nodeTypes={nodeTypes}
           fitView
           snapToGrid
           snapGrid={[15, 15]}
@@ -273,8 +280,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
           <Controls className="!bg-background !border !border-border !shadow-sm" />
           <MiniMap
             className="!bg-background !border !border-border"
-            nodeColor={(node) => {
-              const type = (node.data as any)?.type
+            nodeColor={(node: Node) => {
+              const type = typeof node.data === "object" && node.data && "type" in node.data
+                ? (node.data.type as NodeType)
+                : undefined
               switch (type) {
                 case "trigger":
                   return "#22c55e"
