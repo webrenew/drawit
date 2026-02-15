@@ -3,6 +3,7 @@
 import { MessageSquare, Loader2, Brain } from "lucide-react"
 import type { UIMessage } from "ai"
 import ReactMarkdown from "react-markdown"
+import Image from "next/image"
 
 /**
  * Sanitize image URLs to prevent XSS attacks
@@ -70,7 +71,7 @@ export function ChatMessages({ messages, isLoading }: ChatMessagesProps) {
   if (lastMessage?.role === "assistant" && lastMessage.parts) {
     for (const part of lastMessage.parts) {
       if (part.type.startsWith("tool-")) {
-        const toolPart = part as any
+        const toolPart = part as { state?: string }
         if (toolPart.state === "input-streaming" || toolPart.state === "input-available") {
           const toolName = part.type.replace("tool-", "")
           runningTools.push(toolName)
@@ -118,10 +119,13 @@ export function ChatMessages({ messages, isLoading }: ChatMessagesProps) {
                 const sanitizedUrl = sanitizeImageUrl(part.url)
                 return (
                   <div key={index} className="mt-2">
-                    <img
+                    <Image
                       src={sanitizedUrl}
                       alt={part.filename || "Uploaded image"}
-                      className="max-w-full rounded"
+                      width={480}
+                      height={320}
+                      unoptimized
+                      className="max-w-full h-auto rounded"
                     />
                   </div>
                 )

@@ -3,6 +3,7 @@
 import type React from "react"
 import { useRef } from "react"
 import { Paperclip, Send, X, Loader2 } from "lucide-react"
+import Image from "next/image"
 
 interface UploadedImage {
   url: string
@@ -60,9 +61,12 @@ export function ChatInput({
           <div className="flex flex-wrap gap-2">
             {uploadedImages.map((image, index) => (
               <div key={index} className="relative group">
-                <img
+                <Image
                   src={image.url || "/placeholder.svg"}
                   alt={`Upload ${index + 1}`}
+                  width={64}
+                  height={64}
+                  unoptimized
                   className="w-16 h-16 object-cover rounded border border-border"
                 />
                 <button
