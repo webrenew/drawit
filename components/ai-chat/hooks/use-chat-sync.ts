@@ -181,12 +181,9 @@ export function useDebouncedCloudSave({
           setCloudError(null)
 
           try {
-            // Clear existing messages and save all current ones as a single ordered operation.
+            // Once we begin replacing messages, always complete clear+save together.
+            // Returning early after clear can leave the session empty during rapid save invalidations.
             await chatService.clearMessages(session.id)
-
-            if (requestId !== latestCloudSaveRequestRef.current) {
-              return
-            }
 
             const dbMessages = msgs.map((msg) => chatService.convertToDbMessage(msg))
             await chatService.saveMessages(session.id, dbMessages)
