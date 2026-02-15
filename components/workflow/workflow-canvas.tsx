@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useRef, type DragEvent, useImperativeHandle, forwardRef } from "react"
+import { useState, useCallback, useRef, useEffect, type DragEvent, useImperativeHandle, forwardRef } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -80,6 +80,26 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<WorkflowNodeType, WorkflowEdge> | null>(
     null,
   )
+  const timeoutHandlesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+
+  const scheduleTimeout = useCallback((callback: () => void, delayMs: number) => {
+    const handle = setTimeout(() => {
+      timeoutHandlesRef.current.delete(handle)
+      callback()
+    }, delayMs)
+
+    timeoutHandlesRef.current.add(handle)
+  }, [])
+
+  useEffect(() => {
+    const handles = timeoutHandlesRef.current
+    return () => {
+      for (const handle of handles) {
+        clearTimeout(handle)
+      }
+      handles.clear()
+    }
+  }, [])
 
   useImperativeHandle(ref, () => ({
     addWorkflow: (config: WorkflowConfig, autoLayout = true, direction: "vertical" | "horizontal" = "vertical") => {
@@ -143,7 +163,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
       setEdges((prev) => [...prev, ...newEdges])
 
       // Fit view after adding nodes
-      setTimeout(() => {
+      scheduleTimeout(() => {
         reactFlowInstance?.fitView({ padding: 0.2 })
       }, 100)
     },
@@ -170,11 +190,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
       setNodes(beautifiedNodes)
 
       // Fit view after beautifying
-      setTimeout(() => {
+      scheduleTimeout(() => {
         reactFlowInstance?.fitView({ padding: 0.2 })
       }, 100)
     },
-  }))
+  }), [edges, nodes, reactFlowInstance, scheduleTimeout])
 
   const onNodesChange = useCallback(
     (changes: NodeChange<WorkflowNodeType>[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -245,7 +265,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     )
 
     // Simulate completion after delay
-    setTimeout(() => {
+    scheduleTimeout(() => {
       setNodes((nds) =>
         nds.map((node) => ({
           ...node,
@@ -253,7 +273,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         })),
       )
     }, 2000)
-  }, [])
+  }, [scheduleTimeout])
 
   return (
     <ReactFlowProvider>
