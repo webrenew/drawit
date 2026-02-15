@@ -4,9 +4,18 @@
   "private": true,
   "scripts": {
     "build": "next build",
+    "check": "pnpm typecheck && pnpm lint && pnpm build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "lint:staged": "lint-staged",
+    "prepare": "husky",
+    "start": "next start",
+    "typecheck": "tsc --noEmit --pretty false"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --fix --max-warnings=0"
+    ]
   },
   "dependencies": {
     "@ai-sdk/gateway": "beta",
@@ -90,6 +99,8 @@
     "eslint": "^9.39.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
     "tw-animate-css": "1.3.3",
