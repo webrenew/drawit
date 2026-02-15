@@ -55,6 +55,39 @@ export interface CanvasStateJSON {
   edges: CanvasEdge[]
 }
 
+export type CanvasContextTruncationStrategy = "first" | "last"
+
+export interface CanvasContextOptions {
+  maxNodes?: number
+  maxEdges?: number
+  truncationStrategy?: CanvasContextTruncationStrategy
+}
+
+const DEFAULT_MAX_CONTEXT_NODES = parseContextLimit(process.env.AI_CHAT_CONTEXT_MAX_NODES, 25)
+const DEFAULT_MAX_CONTEXT_EDGES = parseContextLimit(process.env.AI_CHAT_CONTEXT_MAX_EDGES, 20)
+
+function parseContextLimit(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number(rawValue)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback
+  }
+  return Math.floor(parsed)
+}
+
+function resolveContextLimit(value: number | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
+    return fallback
+  }
+  return Math.floor(value)
+}
+
+function truncateItems<T>(items: T[], limit: number, strategy: CanvasContextTruncationStrategy): T[] {
+  if (strategy === "last") {
+    return items.slice(-limit)
+  }
+  return items.slice(0, limit)
+}
+
 /**
  * Convert canvas element to n8n-style node
  */
@@ -140,7 +173,8 @@ export function serializeCanvasState(
  */
 export function createCanvasContextString(
   elements: CanvasElement[],
-  connections: SmartConnection[]
+  connections: SmartConnection[],
+  options: CanvasContextOptions = {},
 ): string {
   if (elements.length === 0) {
     return `CURRENT CANVAS STATE:
@@ -151,16 +185,19 @@ Canvas is empty. Place new content at canvas center.`
   }
 
   const state = serializeCanvasState(elements, connections)
-  
-  // Limit nodes/edges to avoid token bloat (keep first 25 of each)
+  const maxNodes = resolveContextLimit(options.maxNodes, DEFAULT_MAX_CONTEXT_NODES)
+  const maxEdges = resolveContextLimit(options.maxEdges, DEFAULT_MAX_CONTEXT_EDGES)
+  const truncationStrategy = options.truncationStrategy ?? "first"
+
+  // Limit nodes/edges to avoid token bloat (configurable limits + strategy)
   const truncatedState: CanvasStateJSON = {
     ...state,
-    nodes: state.nodes.slice(0, 25),
-    edges: state.edges.slice(0, 20),
+    nodes: truncateItems(state.nodes, maxNodes, truncationStrategy),
+    edges: truncateItems(state.edges, maxEdges, truncationStrategy),
   }
 
-  const truncationNote = elements.length > 25 || connections.length > 20
-    ? `\n(Showing ${truncatedState.nodes.length}/${elements.length} nodes, ${truncatedState.edges.length}/${connections.length} edges)`
+  const truncationNote = elements.length > maxNodes || connections.length > maxEdges
+    ? `\n(Showing ${truncatedState.nodes.length}/${elements.length} nodes, ${truncatedState.edges.length}/${connections.length} edges, strategy: ${truncationStrategy})`
     : ""
 
   // Pretty print with 2-space indent for readability
