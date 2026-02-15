@@ -24,6 +24,7 @@ interface CreateWorkflowToolResult {
   error?: string
 }
 
+const generateEdgeId = () => `edge_${crypto.randomUUID()}`
 export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [localInput, setLocalInput] = useState("")
@@ -49,8 +50,8 @@ export function WorkflowAIChat({ canvasRef }: WorkflowAIChatProps) {
           const edges =
             input.edges && input.edges.length
               ? input.edges
-              : (input.connections || []).map((connection, index) => ({
-                  id: `edge_${Date.now()}_${index}`,
+              : (input.connections || []).map((connection) => ({
+                  id: generateEdgeId(),
                   source: connection.from,
                   target: connection.to,
                   label: connection.label,
