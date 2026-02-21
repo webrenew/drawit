@@ -85,6 +85,14 @@ function mapDiagramTypeToCanvasType(diagramType: string): CanvasElement["type"] 
 const CHAT_HISTORY_LOCAL_KEY = "drawit-chat-history"
 const SAVE_DEBOUNCE_MS = 2000
 type ToolHandlersModule = typeof import("@/lib/ai-chat/tool-handlers")
+const isClientDebugLoggingEnabled =
+  process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_CHAT_DEBUG === "1"
+
+function debugLog(...args: unknown[]) {
+  if (isClientDebugLoggingEnabled) {
+    console.log(...args)
+  }
+}
 
 export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -226,12 +234,12 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
         return
       }
 
-      console.log("[v0] Tool call received:", toolCall.toolName)
+      debugLog("[v0] Tool call received:", toolCall.toolName)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool inputs are validated by Zod schemas at runtime
       const args = toolCall.input as any
 
       const toolContext = getToolContext()
-      console.log("[v0] Tool context elements count:", toolContext.elements?.length ?? 0)
+      debugLog("[v0] Tool context elements count:", toolContext.elements?.length ?? 0)
 
       try {
         let result: unknown
@@ -292,7 +300,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
           case "runBackgroundDiagram": {
             // Handle background diagram generation via Trigger.dev
             const bgArgs = args as RunBackgroundDiagramArgs
-            console.log("[v0] Running background diagram:", bgArgs.diagramType, bgArgs.complexity)
+            debugLog("[v0] Running background diagram:", bgArgs.diagramType, bgArgs.complexity)
             
             try {
               const bgResult = await triggerBackground({
@@ -373,7 +381,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
         }
 
         const resultString = typeof result === "string" ? result : JSON.stringify(result)
-        console.log("[v0] Tool result:", resultString.substring(0, 200))
+        debugLog("[v0] Tool result:", resultString.substring(0, 200))
 
         // Auto-name diagram and chat based on chat context when a diagram is created
         if (isDiagramCreationTool(toolCall.toolName)) {
@@ -386,7 +394,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
 
             // Update diagram title if it's still default
             if (currentDiagram?.title === "Untitled Diagram") {
-              console.log("[v0] Auto-naming diagram:", extractedTitle)
+              debugLog("[v0] Auto-naming diagram:", extractedTitle)
               updateDiagramTitle(extractedTitle).catch(err => {
                 console.error("[v0] Failed to update diagram title:", err)
               })
@@ -394,7 +402,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
 
             // Update chat session title if it's still default
             if (chatSession && chatSession.title === "New Chat") {
-              console.log("[v0] Auto-naming chat session:", extractedTitle)
+              debugLog("[v0] Auto-naming chat session:", extractedTitle)
               chatService.updateSession(chatSession.id, { title: extractedTitle }).catch(err => {
                 console.error("[v0] Failed to update chat session title:", err)
               })
@@ -551,7 +559,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
       setMessages(aiMessages)
       lastSavedMessagesRef.current = getMessagesFingerprint(aiMessages)
       setLastSavedToCloud(new Date())
-      console.log("[chat] Loaded session:", session.id, "with", dbMessages.length, "messages")
+      debugLog("[chat] Loaded session:", session.id, "with", dbMessages.length, "messages")
     } catch (error) {
       console.error("[chat] Failed to load session:", error)
       setCloudError("Failed to load chat")
@@ -587,7 +595,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
           model: selectedModel,
         })
         setChatSession(newSession)
-        console.log("[chat] Created new session:", newSession.id)
+        debugLog("[chat] Created new session:", newSession.id)
       } catch (error) {
         console.error("[chat] Failed to create new session:", error)
       }
@@ -624,7 +632,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
           .filter(img => img.file)
           .map(img => img.file as File)
 
-        console.log("[v0] Uploading images to Supabase:", filesToUpload.length)
+        debugLog("[v0] Uploading images to Supabase:", filesToUpload.length)
 
         const uploadResults = await imageService.uploadImages(filesToUpload)
         const successfulUploads = uploadResults.filter(r => r.success && r.url)
@@ -637,7 +645,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
           )
           // Update ref with base64 URLs for placeImage tool
           uploadedImagesRef.current = dataUrls
-          console.log("[v0] Updated uploadedImagesRef with", dataUrls.length, "base64 URLs (fallback)")
+          debugLog("[v0] Updated uploadedImagesRef with", dataUrls.length, "base64 URLs (fallback)")
           
           // AI SDK v6: sendMessage uses { text, files } format
           const fileParts = imagesToSend.map((img, i) => ({
@@ -652,12 +660,12 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
           return
         }
 
-        console.log("[v0] Images uploaded, sending URLs:", successfulUploads.length)
+        debugLog("[v0] Images uploaded, sending URLs:", successfulUploads.length)
 
         // IMPORTANT: Update uploadedImagesRef with Supabase URLs for placeImage tool
         // This must happen BEFORE sending the message so AI can use these URLs
         uploadedImagesRef.current = successfulUploads.map(u => u.url!)
-        console.log("[v0] Updated uploadedImagesRef with", uploadedImagesRef.current.length, "Supabase URLs")
+        debugLog("[v0] Updated uploadedImagesRef with", uploadedImagesRef.current.length, "Supabase URLs")
 
         // AI SDK v6: sendMessage uses { text, files } format
         const fileParts = successfulUploads.map((upload, i) => {
@@ -675,13 +683,13 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
         })
       } else if (imagesToSend.length > 0 && !user) {
         // Not logged in - use base64 fallback
-        console.log("[v0] User not logged in, using base64 fallback")
+        debugLog("[v0] User not logged in, using base64 fallback")
         const dataUrls = await Promise.all(
           imagesToSend.map(async (img) => img.file ? await fileToBase64(img.file) : img.url)
         )
         // Update ref with base64 URLs for placeImage tool
         uploadedImagesRef.current = dataUrls
-        console.log("[v0] Updated uploadedImagesRef with", dataUrls.length, "base64 URLs (not logged in)")
+        debugLog("[v0] Updated uploadedImagesRef with", dataUrls.length, "base64 URLs (not logged in)")
         
         // AI SDK v6: sendMessage uses { text, files } format
         const fileParts = imagesToSend.map((img, i) => ({
@@ -703,7 +711,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
         if (extractedTitle) {
           // Update diagram title if it's still default
           if (currentDiagram?.title === "Untitled Diagram") {
-            console.log("[v0] Auto-naming diagram from first message:", extractedTitle)
+            debugLog("[v0] Auto-naming diagram from first message:", extractedTitle)
             updateDiagramTitle(extractedTitle).catch(err => {
               console.error("[v0] Failed to update diagram title:", err)
             })
@@ -711,7 +719,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
 
           // Update chat session title if it's still default
           if (chatSession && chatSession.title === "New Chat") {
-            console.log("[v0] Auto-naming chat session from first message:", extractedTitle)
+            debugLog("[v0] Auto-naming chat session from first message:", extractedTitle)
             chatService.updateSession(chatSession.id, { title: extractedTitle }).catch(err => {
               console.error("[v0] Failed to update chat session title:", err)
             })
