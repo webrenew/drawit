@@ -1,6 +1,7 @@
 "use client"
 
 import React from "react"
+import dynamic from "next/dynamic"
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Toolbar } from "./toolbar"
 import { PropertiesPanel } from "./properties-panel"
@@ -24,7 +25,6 @@ import type {
   HandlePosition,
 } from "@/lib/types"
 import { useCanvasStore, useHasHydrated } from "@/lib/store"
-import { SmartConnectorLayer } from "./smart-connector-layer"
 import { autoHandlePositions } from "@/lib/connector-utils"
 // </CHANGE> Import ActionsMenu component
 import { ActionsMenu } from "./actions-menu"
@@ -35,6 +35,10 @@ import { toast } from "sonner"
 // Helper for ID generation
 const generateId = () => Math.random().toString(36).substr(2, 9)
 const CANVAS_DEBUG = process.env.NEXT_PUBLIC_CANVAS_DEBUG === "true"
+const SmartConnectorLayer = dynamic(
+  () => import("./smart-connector-layer").then((mod) => mod.SmartConnectorLayer),
+  { ssr: false },
+)
 
 const canvasDebugLog = (...args: unknown[]) => {
   if (!CANVAS_DEBUG) return
@@ -2173,14 +2177,16 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
             </svg>
           </div>
 
-          <SmartConnectorLayer
-            elements={elements}
-            connections={connections}
-            viewport={viewport}
-            selectedConnectionId={selectedConnectionId}
-            isDarkMode={resolvedTheme === "dark"}
-            onConnectionSelect={handleConnectionClick}
-          />
+          {connections.length > 0 && (
+            <SmartConnectorLayer
+              elements={elements}
+              connections={connections}
+              viewport={viewport}
+              selectedConnectionId={selectedConnectionId}
+              isDarkMode={resolvedTheme === "dark"}
+              onConnectionSelect={handleConnectionClick}
+            />
+          )}
         </div>
       </div>
 
