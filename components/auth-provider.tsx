@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react"
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { User, Session } from "@supabase/supabase-js"
 
@@ -18,7 +18,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const supabase = createClient()
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
+
+  if (!supabaseRef.current) {
+    supabaseRef.current = createClient()
+  }
+
+  const supabase = supabaseRef.current
 
   useEffect(() => {
     // Get initial session
@@ -37,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })
 
     return () => subscription.unsubscribe()
-  }, [supabase.auth])
+  }, [supabase])
 
   const signInWithGoogle = useCallback(async () => {
     await supabase.auth.signInWithOAuth({
@@ -46,11 +52,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     })
-  }, [supabase.auth])
+  }, [supabase])
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
-  }, [supabase.auth])
+  }, [supabase])
 
   return (
     <AuthContext.Provider value={{ user, session, isLoading, signInWithGoogle, signOut }}>
@@ -66,7 +72,6 @@ export function useAuth() {
   }
   return context
 }
-
 
 
 
