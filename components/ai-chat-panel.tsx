@@ -436,12 +436,38 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
   }, [])
 
   const getMessagesFingerprint = useCallback((msgs: UIMessage[]) => {
-    return JSON.stringify(
-      msgs.map((msg) => ({
-        id: msg.id,
-        ...chatService.convertToDbMessage(msg),
-      })),
-    )
+    if (msgs.length === 0) return "empty"
+
+    const last = msgs[msgs.length - 1]
+    const lastWithMeta = last as UIMessage & { content?: string; createdAt?: Date | string }
+
+    let textPartLength = 0
+    let filePartCount = 0
+    let reasoningPartCount = 0
+    for (const part of last.parts || []) {
+      if (part.type === "text") {
+        textPartLength += part.text.length
+      } else if (part.type === "file") {
+        filePartCount += 1
+      } else if (part.type === "reasoning") {
+        reasoningPartCount += 1
+      }
+    }
+
+    const createdAt =
+      lastWithMeta.createdAt instanceof Date ? lastWithMeta.createdAt.toISOString() : (lastWithMeta.createdAt ?? "")
+
+    return [
+      msgs.length,
+      last.id,
+      last.role,
+      createdAt,
+      lastWithMeta.content?.length ?? 0,
+      last.parts?.length ?? 0,
+      textPartLength,
+      filePartCount,
+      reasoningPartCount,
+    ].join("|")
   }, [])
 
   useLoadChatHistory({
