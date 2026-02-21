@@ -2,7 +2,7 @@
 
 import React from "react"
 import dynamic from "next/dynamic"
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Toolbar } from "./toolbar"
 import { PropertiesPanel } from "./properties-panel"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -165,6 +165,41 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
   viewportRef.current = viewport
   elementsRef.current = elements
   selectedConnectionIdRef.current = selectedConnectionId
+
+  const selectedElementIds = useMemo(() => new Set(appState.selection), [appState.selection])
+  const selectedElements = useMemo(
+    () => elements.filter((el) => selectedElementIds.has(el.id)),
+    [elements, selectedElementIds],
+  )
+  const elementById = useMemo(() => {
+    const map = new Map<string, CanvasElement>()
+    for (const el of elements) {
+      map.set(el.id, el)
+    }
+    return map
+  }, [elements])
+  const connectorPreviewAnchor = useMemo(() => {
+    if (!connectorSource) return null
+
+    const element = elementById.get(connectorSource.elementId)
+    if (!element) return null
+
+    const centerX = element.x + element.width / 2
+    const centerY = element.y + element.height / 2
+
+    switch (connectorSource.handle) {
+      case "left":
+        return { x: element.x, y: centerY }
+      case "right":
+        return { x: element.x + element.width, y: centerY }
+      case "top":
+        return { x: centerX, y: element.y }
+      case "bottom":
+        return { x: centerX, y: element.y + element.height }
+      default:
+        return { x: centerX, y: centerY }
+    }
+  }, [connectorSource, elementById])
 
   const centerViewportOnElements = useCallback(() => {
     if (elements.length === 0) return
@@ -2042,7 +2077,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         {/* Fixed properties panel */}
         <PropertiesPanel
           appState={appState}
-          selectedElements={elements.filter((el) => appState.selection.includes(el.id))}
+          selectedElements={selectedElements}
           selectedConnectionId={selectedConnectionId} // Pass selected connection ID
           connections={connections} // Pass connections
           onChange={(updates) => handleAppStateChange(updates)}
@@ -2050,7 +2085,7 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
         />
 
         <ActionsMenu
-          selectedElements={elements.filter((el) => appState.selection.includes(el.id))}
+          selectedElements={selectedElements}
           onAction={handleAction}
         />
 
@@ -2110,32 +2145,8 @@ export function Canvas({ previewElements }: { previewElements?: PreviewState | n
               {
                 connectorSource && connectorPreview && (
                   <line
-                    x1={(() => {
-                      const el = elements.find((e) => e.id === connectorSource.elementId)
-                      if (!el) return 0
-                      const cx = el.x + el.width / 2
-                      switch (connectorSource.handle) {
-                        case "left":
-                          return el.x
-                        case "right":
-                          return el.x + el.width
-                        default:
-                          return cx
-                      }
-                    })()}
-                    y1={(() => {
-                      const el = elements.find((e) => e.id === connectorSource.elementId)
-                      if (!el) return 0
-                      const cy = el.y + el.height / 2
-                      switch (connectorSource.handle) {
-                        case "top":
-                          return el.y
-                        case "bottom":
-                          return el.y + el.height
-                        default:
-                          return cy
-                      }
-                    })()}
+                    x1={connectorPreviewAnchor?.x ?? 0}
+                    y1={connectorPreviewAnchor?.y ?? 0}
                     x2={connectorPreview.x}
                     y2={connectorPreview.y}
                     stroke={getSolidStrokeColor(appState.currentItemStrokeColor)}
