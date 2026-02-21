@@ -4,6 +4,7 @@ import { MessageSquare, Loader2, Brain } from "lucide-react"
 import type { UIMessage } from "ai"
 import ReactMarkdown from "react-markdown"
 import Image from "next/image"
+import { memo, useMemo } from "react"
 
 /**
  * Sanitize image URLs to prevent XSS attacks
@@ -44,6 +45,90 @@ interface ChatMessagesProps {
   isLoading: boolean
 }
 
+function getRenderablePartSignature(message: UIMessage): string {
+  if (!message.parts || message.parts.length === 0) return ""
+
+  return message.parts
+    .filter((part) => part.type === "text" || part.type === "file")
+    .map((part) => {
+      if (part.type === "text") {
+        return `text:${part.text}`
+      }
+
+      if (part.type === "file") {
+        return `file:${part.url || ""}:${part.filename || ""}:${part.mediaType || ""}`
+      }
+
+      return ""
+    })
+    .join("|")
+}
+
+const AssistantMarkdown = memo(
+  function AssistantMarkdown({ text }: { text: string }) {
+    return (
+      <div className="text-sm prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
+        <ReactMarkdown>{text}</ReactMarkdown>
+      </div>
+    )
+  },
+  (prev, next) => prev.text === next.text,
+)
+
+type MessageRowProps = {
+  message: UIMessage
+  signature: string
+}
+
+const MessageRow = memo(
+  function MessageRow({ message }: MessageRowProps) {
+    return (
+      <div className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} mb-3`}>
+        <div
+          className={`max-w-[80%] rounded-lg px-4 py-2 ${
+            message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+          }`}
+        >
+          {message.parts?.map((part, index) => {
+            if (part.type === "text") {
+              return message.role === "assistant" ? (
+                <AssistantMarkdown key={index} text={part.text} />
+              ) : (
+                <p key={index} className="text-sm whitespace-pre-wrap">
+                  {part.text}
+                </p>
+              )
+            }
+
+            if (part.type === "file") {
+              const sanitizedUrl = sanitizeImageUrl(part.url)
+              return (
+                <div key={index} className="mt-2">
+                  <Image
+                    src={sanitizedUrl}
+                    alt={part.filename || "Uploaded image"}
+                    width={480}
+                    height={320}
+                    unoptimized
+                    className="w-auto max-w-full h-auto rounded"
+                  />
+                </div>
+              )
+            }
+
+            if (part.type.startsWith("tool-")) {
+              return null
+            }
+
+            return null
+          })}
+        </div>
+      </div>
+    )
+  },
+  (prev, next) => prev.signature === next.signature && prev.message.role === next.message.role,
+)
+
 function getToolStatusMessage(toolName: string): string {
   const toolMessages: Record<string, string> = {
     getCanvasState: "Checking Canvas",
@@ -64,6 +149,15 @@ function getToolStatusMessage(toolName: string): string {
 }
 
 export function ChatMessages({ messages, isLoading }: ChatMessagesProps) {
+  const messageRows = useMemo(
+    () =>
+      messages.map((message) => ({
+        message,
+        signature: getRenderablePartSignature(message),
+      })),
+    [messages],
+  )
+
   const lastMessage = messages[messages.length - 1]
   const isAgentWorking = isLoading && lastMessage?.role === "assistant"
 
@@ -90,55 +184,8 @@ export function ChatMessages({ messages, isLoading }: ChatMessagesProps) {
         </div>
       )}
 
-      {messages.map((message) => (
-        <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} mb-3`}>
-          <div
-            className={`max-w-[80%] rounded-lg px-4 py-2 ${
-              message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-            }`}
-          >
-            {message.parts?.map((part, index) => {
-              // Handle text parts
-              if (part.type === "text") {
-                return message.role === "assistant" ? (
-                  <div
-                    key={index}
-                    className="text-sm prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0"
-                  >
-                    <ReactMarkdown>{part.text}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <p key={index} className="text-sm whitespace-pre-wrap">
-                    {part.text}
-                  </p>
-                )
-              }
-
-              // Handle file parts (images)
-              if (part.type === "file") {
-                const sanitizedUrl = sanitizeImageUrl(part.url)
-                return (
-                  <div key={index} className="mt-2">
-                    <Image
-                      src={sanitizedUrl}
-                      alt={part.filename || "Uploaded image"}
-                      width={480}
-                      height={320}
-                      unoptimized
-                      className="w-auto max-w-full h-auto rounded"
-                    />
-                  </div>
-                )
-              }
-
-              if (part.type.startsWith("tool-")) {
-                return null
-              }
-
-              return null
-            })}
-          </div>
-        </div>
+      {messageRows.map(({ message, signature }) => (
+        <MessageRow key={message.id} message={message} signature={signature} />
       ))}
 
       {runningTools.length > 0 && (
