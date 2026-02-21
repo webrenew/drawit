@@ -9,6 +9,31 @@ import { extractTitleFromMessages } from "@/lib/ai-chat/title-extractor"
 type DebouncedCloudSave = ReturnType<typeof debounce<(session: ChatSession, msgs: UIMessage[]) => void>>
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
+type DbMessagePayload = ReturnType<typeof chatService.convertToDbMessage>
+
+function getDbMessages(messages: UIMessage[]): DbMessagePayload[] {
+  return messages.map((message) => chatService.convertToDbMessage(message))
+}
+
+function getMessageSignatures(messages: UIMessage[], dbMessages: DbMessagePayload[]): string[] {
+  return dbMessages.map((dbMessage, index) => {
+    const messageId = messages[index]?.id ?? `idx-${index}`
+
+    return [
+      messageId,
+      dbMessage.role,
+      dbMessage.content ?? "",
+      JSON.stringify(dbMessage.parts ?? []),
+      JSON.stringify(dbMessage.tool_calls ?? []),
+      JSON.stringify(dbMessage.tool_results ?? []),
+    ].join(":")
+  })
+}
+
+function hasMatchingPrefix(prefix: string[], target: string[]): boolean {
+  if (prefix.length > target.length) return false
+  return prefix.every((value, index) => value === target[index])
+}
 
 type LoadChatHistoryParams = {
   user: User | null
@@ -24,6 +49,7 @@ type LoadChatHistoryParams = {
   invalidatePendingCloudSaves: () => void
   getMessagesFingerprint: (messages: UIMessage[]) => string
   lastSavedMessagesRef: MutableRefObject<string>
+  persistedMessageSignaturesRef: MutableRefObject<Map<string, string[]>>
   localStorageKey: string
 }
 
@@ -41,6 +67,7 @@ export function useLoadChatHistory({
   invalidatePendingCloudSaves,
   getMessagesFingerprint,
   lastSavedMessagesRef,
+  persistedMessageSignaturesRef,
   localStorageKey,
 }: LoadChatHistoryParams) {
   useEffect(() => {
@@ -63,6 +90,10 @@ export function useLoadChatHistory({
           const aiMessages = dbMessages.length > 0 ? chatService.convertFromDbMessages(dbMessages) : []
           setMessages(aiMessages)
           lastSavedMessagesRef.current = getMessagesFingerprint(aiMessages)
+          persistedMessageSignaturesRef.current.set(
+            session.id,
+            getMessageSignatures(aiMessages, getDbMessages(aiMessages)),
+          )
 
           if (dbMessages.length > 0) {
             setLastSavedToCloud(new Date())
@@ -73,12 +104,18 @@ export function useLoadChatHistory({
             const extractedTitle = extractTitleFromMessages(aiMessages)
 
             if (extractedTitle) {
+              const titleUpdatePromises: Promise<unknown>[] = []
+
               if (session.title === "New Chat") {
-                await chatService.updateSession(session.id, { title: extractedTitle })
+                titleUpdatePromises.push(chatService.updateSession(session.id, { title: extractedTitle }))
               }
 
               if (currentDiagramTitle === "Untitled Diagram") {
-                await updateDiagramTitle(extractedTitle)
+                titleUpdatePromises.push(updateDiagramTitle(extractedTitle))
+              }
+
+              if (titleUpdatePromises.length > 0) {
+                await Promise.allSettled(titleUpdatePromises)
               }
             }
           }
@@ -108,6 +145,9 @@ export function useLoadChatHistory({
         } else if (!isCancelled) {
           setMessages([])
           lastSavedMessagesRef.current = ""
+        }
+        if (!user) {
+          persistedMessageSignaturesRef.current.clear()
         }
       } catch (error) {
         if (!isCancelled) {
@@ -139,6 +179,7 @@ export function useLoadChatHistory({
     invalidatePendingCloudSaves,
     getMessagesFingerprint,
     lastSavedMessagesRef,
+    persistedMessageSignaturesRef,
     localStorageKey,
   ])
 }
@@ -150,6 +191,7 @@ type DebouncedCloudSaveParams = {
   setIsSavingToCloud: StateSetter<boolean>
   setCloudError: StateSetter<string | null>
   setLastSavedToCloud: StateSetter<Date | null>
+  persistedMessageSignaturesRef: MutableRefObject<Map<string, string[]>>
   saveDebounceMs: number
 }
 
@@ -160,6 +202,7 @@ export function useDebouncedCloudSave({
   setIsSavingToCloud,
   setCloudError,
   setLastSavedToCloud,
+  persistedMessageSignaturesRef,
   saveDebounceMs,
 }: DebouncedCloudSaveParams) {
   useEffect(() => {
@@ -181,14 +224,35 @@ export function useDebouncedCloudSave({
           setCloudError(null)
 
           try {
-            // Once we begin replacing messages, always complete clear+save together.
-            // Returning early after clear can leave the session empty during rapid save invalidations.
-            await chatService.clearMessages(session.id)
+            const dbMessages = getDbMessages(msgs)
+            const nextSignatures = getMessageSignatures(msgs, dbMessages)
+            const previousSignatures = persistedMessageSignaturesRef.current.get(session.id) ?? []
+            let didWrite = false
 
-            const dbMessages = msgs.map((msg) => chatService.convertToDbMessage(msg))
-            await chatService.saveMessages(session.id, dbMessages)
+            // Fast path: conversation grew and prior saved messages are an unchanged prefix.
+            if (previousSignatures.length > 0 && hasMatchingPrefix(previousSignatures, nextSignatures)) {
+              if (nextSignatures.length > previousSignatures.length) {
+                await chatService.saveMessages(session.id, dbMessages.slice(previousSignatures.length))
+                didWrite = true
+              }
+            } else if (previousSignatures.length === 0) {
+              // New session with no known cloud messages yet.
+              if (dbMessages.length > 0) {
+                await chatService.saveMessages(session.id, dbMessages)
+                didWrite = true
+              }
+            } else {
+              // Fallback when existing messages changed in-place (edit/regeneration).
+              await chatService.clearMessages(session.id)
+              if (dbMessages.length > 0) {
+                await chatService.saveMessages(session.id, dbMessages)
+              }
+              didWrite = true
+            }
 
-            if (requestId === latestCloudSaveRequestRef.current) {
+            persistedMessageSignaturesRef.current.set(session.id, nextSignatures)
+
+            if (didWrite && requestId === latestCloudSaveRequestRef.current) {
               setLastSavedToCloud(new Date())
             }
           } catch (error) {
@@ -215,6 +279,7 @@ export function useDebouncedCloudSave({
     setIsSavingToCloud,
     setCloudError,
     setLastSavedToCloud,
+    persistedMessageSignaturesRef,
     saveDebounceMs,
   ])
 }

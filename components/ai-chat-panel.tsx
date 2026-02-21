@@ -434,6 +434,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     (((session: ChatSession, msgs: UIMessage[]) => void) & { cancel: () => void; flush: () => void }) | null
   >(null)
   const lastSavedMessagesRef = useRef<string>("")
+  const persistedMessageSignaturesRef = useRef<Map<string, string[]>>(new Map())
   const cloudSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const latestCloudSaveRequestRef = useRef(0)
 
@@ -478,6 +479,20 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     ].join("|")
   }, [])
 
+  const getMessageSignatures = useCallback((msgs: UIMessage[]) => {
+    return msgs.map((msg) => {
+      const dbMessage = chatService.convertToDbMessage(msg)
+      return [
+        msg.id,
+        dbMessage.role,
+        dbMessage.content ?? "",
+        JSON.stringify(dbMessage.parts ?? []),
+        JSON.stringify(dbMessage.tool_calls ?? []),
+        JSON.stringify(dbMessage.tool_results ?? []),
+      ].join(":")
+    })
+  }, [])
+
   useLoadChatHistory({
     user,
     currentDiagramId,
@@ -492,6 +507,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     invalidatePendingCloudSaves,
     getMessagesFingerprint,
     lastSavedMessagesRef,
+    persistedMessageSignaturesRef,
     localStorageKey: CHAT_HISTORY_LOCAL_KEY,
   })
 
@@ -502,6 +518,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
     setIsSavingToCloud,
     setCloudError,
     setLastSavedToCloud,
+    persistedMessageSignaturesRef,
     saveDebounceMs: SAVE_DEBOUNCE_MS,
   })
 
@@ -527,6 +544,9 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
 
     setMessages([])
     lastSavedMessagesRef.current = ""
+    if (chatSession) {
+      persistedMessageSignaturesRef.current.set(chatSession.id, [])
+    }
 
     // Clear from Supabase
     if (user && chatSession) {
@@ -558,6 +578,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
       const aiMessages = chatService.convertFromDbMessages(dbMessages)
       setMessages(aiMessages)
       lastSavedMessagesRef.current = getMessagesFingerprint(aiMessages)
+      persistedMessageSignaturesRef.current.set(session.id, getMessageSignatures(aiMessages))
       setLastSavedToCloud(new Date())
       debugLog("[chat] Loaded session:", session.id, "with", dbMessages.length, "messages")
     } catch (error) {
@@ -574,6 +595,9 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
   const handleNewChat = async () => {
     setMessages([])
     lastSavedMessagesRef.current = ""
+    if (chatSession) {
+      persistedMessageSignaturesRef.current.set(chatSession.id, [])
+    }
     invalidatePendingCloudSaves()
     setChatSession(null)
     setLastSavedToCloud(null)
@@ -596,6 +620,7 @@ export function AIChatPanel({ canvasDimensions }: AIChatPanelProps) {
         })
         setChatSession(newSession)
         debugLog("[chat] Created new session:", newSession.id)
+        persistedMessageSignaturesRef.current.set(newSession.id, [])
       } catch (error) {
         console.error("[chat] Failed to create new session:", error)
       }
