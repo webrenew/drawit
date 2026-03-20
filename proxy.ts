@@ -1,6 +1,6 @@
 /**
- * Next.js Middleware
- * 
+ * Next.js Proxy (formerly Middleware)
+ *
  * Provides:
  * - Security headers (CSP, X-Frame-Options, etc.)
  * - Rate limiting for API routes
@@ -182,7 +182,7 @@ function applySecurityHeaders(response: NextResponse): void {
 // MIDDLEWARE
 // ============================================
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const response = NextResponse.next()
   
